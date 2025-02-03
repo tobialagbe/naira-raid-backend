@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Verify Your Email</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h2>Welcome to Naira Raid!</h2>
+    <p>Hello {{name}},</p>
+    <p>Thank you for registering with Naira Raid. Please verify your email address by clicking the button below:</p>
+    
+    <a href="{{verificationUrl}}" class="button">Verify Email</a>
+    
+    <p>Or copy and paste this link in your browser:</p>
+    <p>{{verificationUrl}}</p>
+    
+    <p>This verification link will expire in 24 hours.</p>
+    
+    <p>If you didn't create an account with Naira Raid, please ignore this email.</p>
+    
+    <div class="footer">
+        <p>This is an automated email, please do not reply.</p>
+        <p>&copy; {{year}} Naira Raid. All rights reserved.</p>
+    </div>
+</body>
+</html> 

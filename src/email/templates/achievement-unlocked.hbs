@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Achievement Unlocked! 🏆</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .achievement {
+            background-color: #ffd700;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .achievement-icon {
+            font-size: 48px;
+            margin: 10px 0;
+        }
+        .reward {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h2>Congratulations, {{name}}! 🎉</h2>
+    
+    <div class="achievement">
+        <div class="achievement-icon">🏆</div>
+        <h3>{{achievementName}}</h3>
+        <p>{{achievementDescription}}</p>
+    </div>
+    
+    <div class="reward">
+        <h4>Your Rewards:</h4>
+        <p>{{rewardDescription}}</p>
+        <p>Points Earned: {{points}}</p>
+    </div>
+    
+    <p>Keep up the great work! Want to see your other achievements?</p>
+    <a href="{{profileUrl}}" class="button">View Your Profile</a>
+    
+    <p>Share your achievement:</p>
+    <p>
+        <a href="{{shareTwitterUrl}}">Twitter</a> |
+        <a href="{{shareFacebookUrl}}">Facebook</a> |
+        <a href="{{shareInstagramUrl}}">Instagram</a>
+    </p>
+    
+    <div class="footer">
+        <p>You received this email because you achieved something awesome in Naira Raid!</p>
+        <p>&copy; {{year}} Naira Raid. All rights reserved.</p>
+    </div>
+</body>
+</html> 

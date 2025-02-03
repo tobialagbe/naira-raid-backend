@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Welcome to Naira Raid!</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .features {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .feature-item {
+            margin: 10px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h2>Welcome to Naira Raid! 🎮</h2>
+    <p>Hello {{name}},</p>
+    <p>Thank you for verifying your email! We're excited to have you join our gaming community.</p>
+    
+    <div class="features">
+        <h3>Here's what you can do now:</h3>
+        <div class="feature-item">🎯 Complete daily missions to earn rewards</div>
+        <div class="feature-item">🏆 Compete in leaderboards</div>
+        <div class="feature-item">🎁 Collect and use power-ups</div>
+        <div class="feature-item">🌟 Track your progress and achievements</div>
+    </div>
+    
+    <p>Ready to start playing?</p>
+    <a href="{{gameUrl}}" class="button">Start Playing Now</a>
+    
+    <p>Need help getting started? Check out our:</p>
+    <ul>
+        <li><a href="{{tutorialUrl}}">Game Tutorial</a></li>
+        <li><a href="{{faqUrl}}">Frequently Asked Questions</a></li>
+        <li><a href="{{supportUrl}}">Support Center</a></li>
+    </ul>
+    
+    <div class="footer">
+        <p>Follow us on social media:</p>
+        <p>
+            <a href="{{instagramUrl}}">Instagram</a> |
+            <a href="{{tiktokUrl}}">TikTok</a>
+        </p>
+        <p>&copy; {{year}} Naira Raid. All rights reserved.</p>
+    </div>
+</body>
+</html> 
