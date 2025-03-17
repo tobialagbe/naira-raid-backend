@@ -29,8 +29,10 @@ export class DailyMission {
   @Prop({ required: true })
   target: number;
 
-  @Prop({ required: true })
-  matchesRequired?: number; // Only for KILLS_IN_MATCHES type
+  @Prop({ required: function(this: DailyMission) {
+    return this.type === MissionType.KILLS_IN_MATCHES;
+  } })
+  matchesRequired?: number;
 
   @Prop({ required: true })
   rewardPoints: number;

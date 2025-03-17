@@ -22,13 +22,7 @@ export class GameSession {
     cashCollected: number;
   };
 
-  @Prop({ required: true })
-  startTime: Date;
-
-  @Prop()
-  endTime?: Date;
-
-  @Prop({ default: false })
+  @Prop({ default: true })
   isCompleted: boolean;
 }
 

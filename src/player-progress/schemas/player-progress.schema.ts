@@ -4,8 +4,8 @@ import { GameType } from '../../common/types/game.types';
 
 export type PlayerProgressDocument = PlayerProgress & Document;
 
-@Schema({ timestamps: true })
-export class RankHistory {
+@Schema()
+class RankHistory {
   @Prop({ required: true })
   rank: string;
 
@@ -13,8 +13,8 @@ export class RankHistory {
   achievedAt: Date;
 }
 
-@Schema({ timestamps: true })
-export class Unlocks {
+@Schema()
+class Unlocks {
   @Prop({ type: [{ type: Types.ObjectId }], default: [] })
   items: Types.ObjectId[];
 
@@ -47,7 +47,7 @@ export class PlayerProgress {
   @Prop({
     type: {
       current: { type: String, required: true },
-      history: { type: [RankHistory], default: [] },
+      history: { type: [{ rank: String, achievedAt: Date }], default: [] }
     },
     required: true,
   })
@@ -56,7 +56,7 @@ export class PlayerProgress {
     history: RankHistory[];
   };
 
-  @Prop({ type: Unlocks, default: {} })
+  @Prop({ type: () => Unlocks, default: {} })
   unlocks: Unlocks;
 }
 

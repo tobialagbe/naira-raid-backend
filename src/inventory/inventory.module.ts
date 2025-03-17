@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ConfigModule } from '@nestjs/config';
 import { InventoryService } from './inventory.service';
 import { InventoryController } from './inventory.controller';
 import {
@@ -13,6 +14,7 @@ import {
 
 @Module({
   imports: [
+    ConfigModule,
     MongooseModule.forFeature([
       { name: InventoryItem.name, schema: InventoryItemSchema },
       { name: UserInventory.name, schema: UserInventorySchema },

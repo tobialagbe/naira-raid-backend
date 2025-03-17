@@ -15,6 +15,7 @@ export class EmailModule {
     return {
       module: EmailModule,
       imports: [
+        ConfigModule,
         MailerModule.forRootAsync({
           imports: [ConfigModule],
           useFactory: async (configService: ConfigService) => ({
@@ -42,17 +43,18 @@ export class EmailModule {
         }),
         ...this.getQueueImports(),
       ],
-      providers: [EmailService, EmailProcessor, EmailHealthIndicator],
+      providers: [
+        EmailService,
+        EmailHealthIndicator,
+        ...(process.env.USE_EMAIL_QUEUE === 'true' ? [EmailProcessor] : []),
+      ],
       controllers: [EmailMonitoringController],
       exports: [EmailService, EmailHealthIndicator],
     };
   }
 
-  private static getQueueImports() {
-    const configService = new ConfigService();
-    const useQueue = configService.get<boolean>('USE_EMAIL_QUEUE', false);
-
-    if (!useQueue) {
+  private static getQueueImports(): DynamicModule[] {
+    if (process.env.USE_EMAIL_QUEUE !== 'true') {
       return [];
     }
 

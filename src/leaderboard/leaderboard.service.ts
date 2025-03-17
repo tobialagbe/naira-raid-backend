@@ -1,6 +1,7 @@
+/* eslint-disable max-len */
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Leaderboard, LeaderboardDocument } from './schemas/leaderboard.schema';
 import { LeaderboardEntry, LeaderboardEntryDocument } from './schemas/leaderboard-entry.schema';
 import { GameSession, GameSessionDocument } from './schemas/game-session.schema';
@@ -67,32 +68,19 @@ export class LeaderboardService {
   }
 
   async createGameSession(userId: string, createGameSessionDto: CreateGameSessionDto): Promise<GameSessionDocument> {
+    // Create a new game session
     const session = new this.gameSessionModel({
       userId,
       ...createGameSessionDto,
+      isCompleted: true, // Session is already completed
     });
-    return session.save();
-  }
-
-  async completeGameSession(sessionId: string): Promise<GameSessionDocument> {
-    const session = await this.gameSessionModel.findById(sessionId);
-    if (!session) {
-      throw new NotFoundException('Game session not found');
-    }
-
-    if (session.isCompleted) {
-      throw new BadRequestException('Game session already completed');
-    }
-
-    session.isCompleted = true;
-    session.endTime = new Date();
     await session.save();
 
     // Update leaderboard entry if score is higher
-    const currentLeaderboard = await this.getCurrentLeaderboard(session.gameId);
-    await this.updateLeaderboardEntry(session.userId, currentLeaderboard._id, {
+    const currentLeaderboard = await this.getCurrentLeaderboard(String(session.gameId));
+    await this.updateLeaderboardEntry(String(session.userId), currentLeaderboard._id.toString(), {
       score: session.score,
-      gameId: session.gameId,
+      gameId: String(session.gameId), 
       seasonNumber: currentLeaderboard.seasonNumber,
       gameStats: session.gameStats,
     });
@@ -102,7 +90,7 @@ export class LeaderboardService {
 
   private async updateLeaderboardEntry(
     userId: string,
-    leaderboardId: string,
+    leaderboardId: string | Types.ObjectId,
     data: CreateLeaderboardEntryDto,
   ): Promise<LeaderboardEntryDocument> {
     const existingEntry = await this.leaderboardEntryModel.findOne({
@@ -138,6 +126,20 @@ export class LeaderboardService {
       })
       .populate('userId', '-password');
 
+    // Calculate player rank by getting all entries sorted by score
+    const allEntries = await this.leaderboardEntryModel
+      .find({ leaderboardId: currentLeaderboard._id })
+      .sort({ score: -1 });
+    
+    // Find player's position in the sorted list
+    let playerRank = 0;
+    for (let i = 0; i < allEntries.length; i++) {
+      if (String(allEntries[i].userId) === String(userId)) {
+        playerRank = i + 1; // +1 because array is 0-indexed
+        break;
+      }
+    }
+
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
@@ -148,16 +150,92 @@ export class LeaderboardService {
       .find({
         userId,
         gameId,
-        startTime: { $gte: todayStart, $lte: todayEnd },
+        createdAt: { $gte: todayStart, $lte: todayEnd }, // Use createdAt instead of startTime
         isCompleted: true,
       })
       .sort({ score: -1 });
 
     return {
       currentSeasonBest: entry,
+      allTimeHighScore: entry?.score || 0,
+      playerRank: playerRank,
       todayGames,
       todayBestScore: todayGames[0]?.score || 0,
       gamesPlayedToday: todayGames.length,
+      totalGamesPlayed: await this.gameSessionModel.countDocuments({ userId, gameId, isCompleted: true }),
+      totalKills: await this.calculateTotalKills(userId, gameId),
+      totalCashCollected: await this.calculateTotalCash(userId, gameId),
     };
+  }
+
+  // Helper methods
+  async calculateTotalKills(userId, gameId) {
+    const result = await this.gameSessionModel.aggregate([
+      { $match: { userId, gameId, isCompleted: true } },
+      { $group: { _id: null, total: { $sum: '$gameStats.totalKills' } } },
+    ]);
+    return result.length > 0 ? result[0].total : 0;
+  }
+
+  async calculateTotalCash(userId, gameId) {
+    const result = await this.gameSessionModel.aggregate([
+      { $match: { userId, gameId, isCompleted: true } },
+      { $group: { _id: null, total: { $sum: '$gameStats.cashCollected' } } },
+    ]);
+    return result.length > 0 ? result[0].total : 0;
+  }
+
+  async getTopPlayers(gameId: string, limit: number = 10) {
+    try {
+      // Get the current active leaderboard for the specified game
+      const currentLeaderboard = await this.getCurrentLeaderboard(gameId);
+      
+      // Fetch the top N entries, sorted by score (and extraPoints as tiebreaker)
+      const topEntries = await this.leaderboardEntryModel
+        .find({ leaderboardId: currentLeaderboard._id })
+        .sort({ score: -1, extraPoints: -1 })
+        .limit(limit)
+        .populate('userId', 'username') // Only get the username field from the user document
+        .exec();
+      
+      // Return empty array if no entries found
+      if (!topEntries || topEntries.length === 0) {
+        return {
+          gameId,
+          leaderboardId: currentLeaderboard._id,
+          seasonNumber: currentLeaderboard.seasonNumber,
+          entries: [],
+        };
+      }
+      
+      // Transform the entries to the required format (position, username, score)
+      const formattedEntries = topEntries.map((entry, index) => {
+        // Handle case where userId might not be populated properly
+        const username = entry.userId && typeof entry.userId === 'object' ? 
+          entry.userId.username : 'Unknown Player';
+          
+        return {
+          position: index + 1, // Position is 1-indexed
+          username,
+          score: entry.score,
+        };
+      });
+      
+      return {
+        gameId,
+        leaderboardId: currentLeaderboard._id,
+        seasonNumber: currentLeaderboard.seasonNumber,
+        entries: formattedEntries,
+      };
+    } catch (error) {
+      // Re-throw NotFoundException from getCurrentLeaderboard if no active leaderboard
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      // Log error and return a generic error for other types
+      console.error('Error fetching top players:', error);
+      throw new BadRequestException('Could not retrieve leaderboard data');
+    }
   }
 }

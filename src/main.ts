@@ -17,6 +17,7 @@ async function bootstrap() {
     .addTag('player-progress', 'Player progression system')
     .addTag('inventory', 'Inventory management')
     .addTag('daily-missions', 'Daily missions system')
+    .addTag('battle-royale', 'Battle Royale mode and multiplayer')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

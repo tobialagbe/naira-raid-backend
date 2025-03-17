@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
@@ -19,7 +19,7 @@ export class EmailService implements OnModuleInit {
   private deliveryTimes: number[] = [];
 
   constructor(
-    @InjectQueue('email') private readonly emailQueue: Queue,
+    @Optional() @InjectQueue('email') private readonly emailQueue: Queue,
     private readonly mailerService: MailerService,
     private readonly configService: ConfigService,
   ) {

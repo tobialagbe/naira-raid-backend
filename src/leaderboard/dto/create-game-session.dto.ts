@@ -1,4 +1,4 @@
-import { IsDate, IsEnum, IsNumber, IsObject, Min, ValidateNested } from 'class-validator';
+import { IsEnum, IsNumber, IsObject, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { GameType } from '../../common/types/game.types';
 
@@ -24,12 +24,4 @@ export class CreateGameSessionDto {
   @Type(() => GameStatsDto)
   @IsObject()
   gameStats: GameStatsDto;
-
-  @Type(() => Date)
-  @IsDate()
-  startTime: Date;
-
-  @IsDate()
-  @Type(() => Date)
-  endTime: Date;
 } 

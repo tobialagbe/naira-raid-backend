@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ConfigModule } from '@nestjs/config';
 import { DailyMissionsService } from './daily-missions.service';
 import { DailyMissionsController } from './daily-missions.controller';
 import {
@@ -13,6 +14,7 @@ import {
 
 @Module({
   imports: [
+    ConfigModule,
     MongooseModule.forFeature([
       { name: DailyMission.name, schema: DailyMissionSchema },
       { name: UserMissionProgress.name, schema: UserMissionProgressSchema },
