@@ -36,7 +36,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       try {
         const data = JSON.parse(msg.toString());
         
-
         switch (data.type) {
           case 'connect':
             this.handleConnect(data, rinfo);
@@ -52,6 +51,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
             break;
           case 'attack':
             this.handleAttack(data, rinfo);
+            break;
+          case 'damage':
+            this.handleDamage(data, rinfo);
             break;
           case 'death':
             this.handleDeath(data, rinfo);
@@ -99,7 +101,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         position: { x: 0, y: 0, z: 0 },
         flip: { x: 1, y: 1, z: 1 },
         rotation: 0,
-        isAlive: true
+        isAlive: true,
+        health: 5 // Max health
       };
       this.logger.log(`Player connected: ${playerId} from ${rinfo.address}:${rinfo.port}`);
 
@@ -108,6 +111,16 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         this.updatePlayerInDatabase(playerId, eventId, roomId);
       }
     }
+
+    const testPlayer = {
+      playerId: '123456',
+      position: { x: 1, y: 1, z: 1 },
+      flip: { x: 1, y: 1, z: 1 },
+      rotation: 0,
+      isAlive: true,
+      health: 5,
+      bot:true,
+    };
 
     // A) Send a "connect_ack" back to this newly connected client
     // including a list of existing players so they can spawn them locally.
@@ -119,15 +132,18 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         flip: info.flip,
         rotation: info.rotation,
         isAlive: info.isAlive,
+        health: info.health,
+        bot: false
       }));
 
     this.sendMessage({
       type: 'connect_ack',
       message: 'Welcome to the server!',
-      existingPlayers: existingPlayersList,
+      // existingPlayers: existingPlayersList,
+      existingPlayers: [testPlayer, ...existingPlayersList],
     }, rinfo.address, rinfo.port);
 
-    console.log('broadcast spawn');
+    console.log('broadcast spawn!!! ');
 
     // B) Broadcast a "spawn" event to all OTHER players that a new player has joined
     this.broadcastExcept({
@@ -136,7 +152,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       position: { x: 0, y: 0, z: 0 },
       flip: { x: 1, y: 1, z: 1 },
       rotation: 0,
-      isAlive: true
+      isAlive: true,
+      health: 5,
+      bot: false
     }, playerId, roomId);
   }
 
@@ -196,9 +214,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Handle an attack event.
    */
   private handleAttack(data: any, rinfo: dgram.RemoteInfo) {
+    console.log('person dey shoot');
     const playerId = data.playerId;
     const player = this.players[playerId];
     if (!player || !player.isAlive) return;
+
+    console.log('attacking!!! ');
 
     // Broadcast to everyone except the attacker in the same room
     this.broadcastExcept({
@@ -206,6 +227,37 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       playerId: playerId,
       shootPoint: data.shootPoint || { x: 0, y: 0, z: 0 },
       shootDirection: data.shootDirection || { x: 0, y: 0 }
+    }, playerId, player.roomId);
+  }
+
+  /**
+   * Handle damage event
+   */
+  private handleDamage(data: any, rinfo: dgram.RemoteInfo) {
+    const playerId = data.playerId;
+    const player = this.players[playerId];
+    if (!player || !player.isAlive) return;
+
+    player.health = Math.max(0, player.health - data.damage);
+
+    if (player.health <= 0) {
+      player.isAlive = false;
+      
+      // Update database if this is a Battle Royale event
+      if (player.eventId) {
+        this.updatePlayerDeathInDatabase(playerId, player.eventId, data.position || 0);
+      }
+    }
+
+    console.log('damage!!! ');
+
+    // Broadcast damage to all players in the room
+    this.broadcastExcept({
+      type: 'damage',
+      playerId: playerId,
+      damage: data.damage,
+      shooterId: data.shooterId,
+      currentHealth: player.health
     }, playerId, player.roomId);
   }
 
