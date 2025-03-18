@@ -263,6 +263,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     player.position = data.position;
 
+    console.log('moved!!! ');
+
     // Broadcast this movement to all other players in the same room
     this.broadcastExcept({
       type: 'move',
@@ -281,6 +283,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     player.flip = data.localScale;
 
+    console.log('flipped!!! ');
+
     this.broadcastExcept({
       type: 'flip',
       playerId: playerId,
@@ -297,6 +301,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     if (!player || !player.isAlive) return;
 
     player.rotation = data.rotation;
+
+    console.log('rotated!!! ');
 
     this.broadcastExcept({
       type: 'rotate',
