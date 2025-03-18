@@ -227,14 +227,14 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         rotation: info.rotation,
         isAlive: info.isAlive,
         health: info.health,
-        bot: false
+        bot: false,
+        roomId: info.roomId
       }));
 
     this.sendMessage({
       type: 'connect_ack',
       message: 'Welcome to the server!',
-      // existingPlayers: existingPlayersList,
-      existingPlayers: [testPlayer, ...existingPlayersList],
+      existingPlayers: [testPlayer, ...existingPlayersList], // Send both test player and real players
     }, rinfo.address, rinfo.port);
 
     console.log('broadcast spawn!!! ');
@@ -248,7 +248,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       rotation: 0,
       isAlive: true,
       health: 5,
-      bot: false
+      bot: false,
+      roomId: roomId,
     }, playerId, roomId);
   }
 
@@ -266,7 +267,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.broadcastExcept({
       type: 'move',
       playerId: playerId,
-      position: data.position
+      position: data.position,
     }, playerId, player.roomId);
   }
 
