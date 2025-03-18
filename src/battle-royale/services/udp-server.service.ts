@@ -1,3 +1,4 @@
+/* eslint-disable max-len */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import * as dgram from 'dgram';
@@ -11,6 +12,18 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
   private server: dgram.Socket;
   private players: Record<string, any> = {};
   private readonly UDP_PORT = 41234;
+  
+  // Track last activity time for each player to handle timeouts
+  private playerLastActivity: Record<string, number> = {};
+  
+  // How long a player can be inactive before being considered disconnected (ms)
+  private readonly PLAYER_TIMEOUT = 15000; // 15 seconds
+  
+  // Interval for checking player timeouts (ms)
+  private readonly CLEANUP_INTERVAL = 10000; // 10 seconds
+  
+  // Timer for cleanup
+  private cleanupTimer: NodeJS.Timeout;
 
   constructor(
     @InjectModel(BattleRoyalePlayer.name)
@@ -19,11 +32,18 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     this.startServer();
+    
+    // Start a timer to clean up disconnected players
+    this.cleanupTimer = setInterval(() => this.cleanupDisconnectedPlayers(), this.CLEANUP_INTERVAL);
   }
 
   onModuleDestroy() {
     if (this.server) {
       this.server.close();
+    }
+    
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
     }
   }
 
@@ -31,10 +51,27 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     // Create a UDP socket (IPv4)
     this.server = dgram.createSocket('udp4');
 
+    // Configure socket for better performance with mobile clients
+    this.server.setBroadcast(false);
+    this.server.setRecvBufferSize(65536); // Larger buffer for mobile clients with inconsistent networking
+    this.server.setSendBufferSize(65536);
+
     // When we receive a message (datagram):
     this.server.on('message', (msg, rinfo) => {
       try {
         const data = JSON.parse(msg.toString());
+        const playerId = data.playerId;
+        
+        // Update last activity time for this player
+        if (playerId) {
+          this.playerLastActivity[playerId] = Date.now();
+        }
+        
+        // Handle ping messages for keeping mobile connections alive
+        if (data.type === 'ping') {
+          this.handlePing(data, rinfo);
+          return;
+        }
         
         switch (data.type) {
           case 'connect':
@@ -83,6 +120,51 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.server.bind(this.UDP_PORT);
   }
 
+    /**
+   * Handle ping messages (keep-alive)
+   */
+    private handlePing(data: any, rinfo: dgram.RemoteInfo) {
+      // Simply send a pong response back to the client
+      this.sendMessage({
+        type: 'pong',
+        timestamp: data.timestamp || Date.now()
+      }, rinfo.address, rinfo.port);
+    }
+  
+    /**
+     * Periodically check for and remove disconnected players
+     */
+    private cleanupDisconnectedPlayers() {
+      const now = Date.now();
+      // eslint-disable-next-line prefer-const
+      let disconnectedPlayers = [];
+      
+      for (const [playerId, lastActivity] of Object.entries(this.playerLastActivity)) {
+        if (now - lastActivity > this.PLAYER_TIMEOUT) {
+          disconnectedPlayers.push(playerId);
+        }
+      }
+      
+      // Remove disconnected players
+      for (const playerId of disconnectedPlayers) {
+        if (this.players[playerId]) {
+          const roomId = this.players[playerId].roomId;
+          
+          this.logger.log(`Player ${playerId} timed out and will be disconnected`);
+          
+          // Broadcast to other players that this player has disconnected
+          this.broadcastExcept({
+            type: 'death',
+            playerId: playerId
+          }, playerId, roomId);
+          
+          // Clean up player data
+          delete this.players[playerId];
+          delete this.playerLastActivity[playerId];
+        }
+      }
+    }
+
   /**
    * Handle a new player connecting.
    */
@@ -120,6 +202,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       isAlive: true,
       health: 5,
       bot:true,
+      roomId: 'test',
     };
 
     // A) Send a "connect_ack" back to this newly connected client
@@ -297,15 +380,20 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Helper function to send a JSON message via UDP.
+   * Helper function to send a JSON message via UDP with improved error handling.
    */
   private sendMessage(dataObj: any, address: string, port: number) {
     const message = Buffer.from(JSON.stringify(dataObj));
-    this.server.send(message, port, address, (err) => {
-      if (err) {
-        this.logger.error('Failed to send message:', err);
-      }
-    });
+    
+    try {
+      this.server.send(message, 0, message.length, port, address, (err) => {
+        if (err) {
+          this.logger.error('Failed to send message:', err);
+        }
+      });
+    } catch (error) {
+      this.logger.error('Error sending UDP message:', error);
+    }
   }
 
   /**
