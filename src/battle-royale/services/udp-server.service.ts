@@ -73,6 +73,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       try {
         const data = JSON.parse(msg.toString());
         const playerId = data.playerId;
+
+        // Always update the player's network info
+        if (playerId && this.players[playerId]) {
+          this.players[playerId].address = rinfo.address;
+          this.players[playerId].port = rinfo.port;
+        }
         
         // Update last activity time for this player
         if (playerId) {
@@ -205,16 +211,16 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const testPlayer = {
-      playerId: '123456',
-      position: { x: 1, y: 1, z: 1 },
-      flip: { x: 1, y: 1, z: 1 },
-      rotation: 0,
-      isAlive: true,
-      health: 5,
-      bot:true,
-      roomId: 'test',
-    };
+    // const testPlayer = {
+    //   playerId: '123456',
+    //   position: { x: 1, y: 1, z: 1 },
+    //   flip: { x: 1, y: 1, z: 1 },
+    //   rotation: 0,
+    //   isAlive: true,
+    //   health: 5,
+    //   bot:true,
+    //   roomId: 'test',
+    // };
 
     // A) Send a "connect_ack" back to this newly connected client
     // including a list of existing players so they can spawn them locally.
@@ -234,10 +240,10 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.sendMessage({
       type: 'connect_ack',
       message: 'Welcome to the server!',
-      existingPlayers: [testPlayer, ...existingPlayersList], // Send both test player and real players
+      existingPlayers: [existingPlayersList], // Send both test player and real players
     }, rinfo.address, rinfo.port);
 
-    console.log('broadcast spawn!!! ');
+    // console.log('broadcast spawn!!! ');
 
     // B) Broadcast a "spawn" event to all OTHER players that a new player has joined
     this.broadcastExcept({
@@ -263,7 +269,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     player.position = data.position;
 
-    console.log('moved!!! ');
+    // console.log('moved!!! ');
 
     // Broadcast this movement to all other players in the same room
     this.broadcastExcept({
@@ -283,7 +289,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     player.flip = data.localScale;
 
-    console.log('flipped!!! ');
+    // console.log('flipped!!! ');
 
     this.broadcastExcept({
       type: 'flip',
@@ -302,7 +308,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     player.rotation = data.rotation;
 
-    console.log('rotated!!! ');
+    // console.log('rotated!!! ');
 
     this.broadcastExcept({
       type: 'rotate',
@@ -320,7 +326,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     const player = this.players[playerId];
     if (!player || !player.isAlive) return;
 
-    console.log('attacking!!! ');
+    // console.log('attacking!!! ');
 
     // Broadcast to everyone except the attacker in the same room
     this.broadcastExcept({
@@ -350,7 +356,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    console.log('damage!!! ');
+    // console.log('damage!!! ');
 
     // Broadcast damage to all players in the room
     this.broadcastExcept({
@@ -388,13 +394,19 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Broadcast a message to all players in a specific room except the specified playerId.
    */
   private broadcastExcept(msgObj: any, exceptPlayerId: string, roomId: string | null = null) {
+    let broadcastCount = 0;
     for (const [pid, info] of Object.entries(this.players)) {
       // Skip if it's the excluded player or not in the same room
       if (pid === exceptPlayerId) continue;
       if (roomId && info.roomId !== roomId) continue;
 
+      this.logger.debug(`Broadcasting to ${pid} at ${info.address}:${info.port}`);
+      console.log(`Broadcasting to ${pid} at ${info.address}:${info.port}`);
       this.sendMessage(msgObj, info.address, info.port);
+      broadcastCount++;
     }
+    this.logger.log(`Broadcast message to ${broadcastCount} players in room ${roomId}`);
+    console.log(`Broadcast message to ${broadcastCount} players in room ${roomId}`);
   }
 
   /**
