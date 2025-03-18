@@ -1,3 +1,4 @@
+/* eslint-disable prefer-const */
 /* eslint-disable max-len */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
@@ -52,9 +53,20 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.server = dgram.createSocket('udp4');
 
     // Configure socket for better performance with mobile clients
-    this.server.setBroadcast(false);
-    this.server.setRecvBufferSize(65536); // Larger buffer for mobile clients with inconsistent networking
-    this.server.setSendBufferSize(65536);
+    // NOTE: Configure socket options AFTER binding the socket, not before
+    this.server.on('listening', () => {
+      try {
+        // These operations should only be performed after socket is bound
+        this.server.setBroadcast(false);
+        this.server.setRecvBufferSize(65536); // Larger buffer for mobile clients with inconsistent networking
+        this.server.setSendBufferSize(65536);
+        
+        const address = this.server.address();
+        this.logger.log(`UDP Server listening at ${address.address}:${address.port}`);
+      } catch (err) {
+        this.logger.error(`Error configuring socket: ${err.message}`);
+      }
+    });
 
     // When we receive a message (datagram):
     this.server.on('message', (msg, rinfo) => {
@@ -120,50 +132,49 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.server.bind(this.UDP_PORT);
   }
 
-    /**
+  /**
    * Handle ping messages (keep-alive)
    */
-    private handlePing(data: any, rinfo: dgram.RemoteInfo) {
-      // Simply send a pong response back to the client
-      this.sendMessage({
-        type: 'pong',
-        timestamp: data.timestamp || Date.now()
-      }, rinfo.address, rinfo.port);
-    }
-  
-    /**
-     * Periodically check for and remove disconnected players
-     */
-    private cleanupDisconnectedPlayers() {
-      const now = Date.now();
-      // eslint-disable-next-line prefer-const
-      let disconnectedPlayers = [];
-      
-      for (const [playerId, lastActivity] of Object.entries(this.playerLastActivity)) {
-        if (now - lastActivity > this.PLAYER_TIMEOUT) {
-          disconnectedPlayers.push(playerId);
-        }
-      }
-      
-      // Remove disconnected players
-      for (const playerId of disconnectedPlayers) {
-        if (this.players[playerId]) {
-          const roomId = this.players[playerId].roomId;
-          
-          this.logger.log(`Player ${playerId} timed out and will be disconnected`);
-          
-          // Broadcast to other players that this player has disconnected
-          this.broadcastExcept({
-            type: 'death',
-            playerId: playerId
-          }, playerId, roomId);
-          
-          // Clean up player data
-          delete this.players[playerId];
-          delete this.playerLastActivity[playerId];
-        }
+  private handlePing(data: any, rinfo: dgram.RemoteInfo) {
+    // Simply send a pong response back to the client
+    this.sendMessage({
+      type: 'pong',
+      timestamp: data.timestamp || Date.now()
+    }, rinfo.address, rinfo.port);
+  }
+
+  /**
+   * Periodically check for and remove disconnected players
+   */
+  private cleanupDisconnectedPlayers() {
+    const now = Date.now();
+    let disconnectedPlayers = [];
+    
+    for (const [playerId, lastActivity] of Object.entries(this.playerLastActivity)) {
+      if (now - lastActivity > this.PLAYER_TIMEOUT) {
+        disconnectedPlayers.push(playerId);
       }
     }
+    
+    // Remove disconnected players
+    for (const playerId of disconnectedPlayers) {
+      if (this.players[playerId]) {
+        const roomId = this.players[playerId].roomId;
+        
+        this.logger.log(`Player ${playerId} timed out and will be disconnected`);
+        
+        // Broadcast to other players that this player has disconnected
+        this.broadcastExcept({
+          type: 'death',
+          playerId: playerId,
+        }, playerId, roomId);
+        
+        // Clean up player data
+        delete this.players[playerId];
+        delete this.playerLastActivity[playerId];
+      }
+    }
+  }
 
   /**
    * Handle a new player connecting.
