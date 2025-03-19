@@ -152,6 +152,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
           case 'death':
             this.handleDeath(data, rinfo);
             break;
+          case 'disconnect':
+            this.handleDisconnect(data, rinfo);
+            break;
           default:
             // Use template string for clarity in logs
             this.logger.warn(`Unknown message type: ${data.type}`);
@@ -226,10 +229,10 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         // Optionally, if your game logic treats a timeout as an actual elimination
         // you can set isAlive = false or update the DB here, e.g.:
         //
-        // this.players[playerId].isAlive = false;
-        // if (this.players[playerId].eventId) {
-        //   this.updatePlayerDeathInDatabase(playerId, this.players[playerId].eventId, /*position=*/0);
-        // }
+        this.players[playerId].isAlive = false;
+        if (this.players[playerId].eventId) {
+          this.updatePlayerDeathInDatabase(playerId, this.players[playerId].eventId, /*position=*/0);
+        }
 
         // Clean up memory
         delete this.players[playerId];
@@ -441,6 +444,38 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       type: 'death',
       playerId: playerId,
     }, playerId, player.roomId);
+  }
+
+  /**
+   * handleDisconnect
+   * ---------------
+   * Handles an explicit disconnect message from a client.
+   * This allows for clean disconnections without waiting for timeout.
+   */
+  private handleDisconnect(data: any, rinfo: dgram.RemoteInfo) {
+    const playerId = data.playerId;
+    const player = this.players[playerId];
+    if (!player) return;
+
+    const roomId = player.roomId;
+    
+    // Log the clean disconnect
+    this.logger.log(`Player ${playerId} disconnected cleanly`);
+
+    // Broadcast disconnect to other players in the room
+    this.broadcastExcept({
+      type: 'disconnect',
+      playerId: playerId,
+    }, playerId, roomId);
+
+    // If this was a Battle Royale event player, update their status
+    if (player.eventId) {
+      this.updatePlayerDeathInDatabase(playerId, player.eventId, 0);
+    }
+
+    // Clean up the player data
+    delete this.players[playerId];
+    delete this.playerLastActivity[playerId];
   }
 
   /**
