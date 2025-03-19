@@ -51,8 +51,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Configuration constants
    */
   private readonly UDP_PORT = 41234;
-  private readonly PLAYER_TIMEOUT = 15000;      // 15 seconds inactivity => disconnect
-  private readonly CLEANUP_INTERVAL = 10000;    // 10 seconds interval to check for inactivity
+  private readonly PLAYER_TIMEOUT = 70000;      // 70 seconds inactivity => disconnect
+  private readonly CLEANUP_INTERVAL = 60000;    // 60 seconds interval to check for inactivity
 
   /**
    * Timer for the cleanup interval
@@ -217,21 +217,29 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     for (const playerId of disconnectedPlayers) {
       if (this.players[playerId]) {
         const roomId = this.players[playerId].roomId;
+        const playerInfo = this.players[playerId]; // Store reference before deletion
 
         this.logger.log(`Player ${playerId} timed out and will be disconnected.`);
 
+        // Send disconnect message to the timed out player
+        this.sendMessage({
+          type: 'disconnect',
+          playerId: playerId,
+          reason: 'inactivity_timeout'
+        }, playerInfo.address, playerInfo.port);
+
         // Broadcast to other players that this player has disconnected
         this.broadcastExcept({
-          type: 'disconnect',  // Distinguish from an in-game 'death'
+          type: 'disconnect',
           playerId: playerId,
+          reason: 'inactivity_timeout'
         }, playerId, roomId);
 
         // Optionally, if your game logic treats a timeout as an actual elimination
         // you can set isAlive = false or update the DB here, e.g.:
-        //
-        this.players[playerId].isAlive = false;
-        if (this.players[playerId].eventId) {
-          this.updatePlayerDeathInDatabase(playerId, this.players[playerId].eventId, /*position=*/0);
+        playerInfo.isAlive = false;
+        if (playerInfo.eventId) {
+          this.updatePlayerDeathInDatabase(playerId, playerInfo.eventId, /*position=*/0);
         }
 
         // Clean up memory
