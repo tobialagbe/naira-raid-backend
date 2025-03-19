@@ -53,6 +53,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
   private readonly UDP_PORT = 41234;
   private readonly PLAYER_TIMEOUT = 70000;      // 70 seconds inactivity => disconnect
   private readonly CLEANUP_INTERVAL = 60000;    // 60 seconds interval to check for inactivity
+  private readonly PING_INTERVAL = 30000;       // Clients should ping every 30 seconds
 
   /**
    * Timer for the cleanup interval
@@ -188,11 +189,22 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * handlePing
    * ----------
    * Responds to "ping" messages with a "pong" to keep connections alive.
+   * Also updates the player's last activity time.
    */
   private handlePing(data: any, rinfo: dgram.RemoteInfo) {
+    const playerId = data.playerId;
+    
+    // Update last activity time if this is a known player
+    if (playerId && this.players[playerId]) {
+      this.playerLastActivity[playerId] = Date.now();
+    }
+
+    // Send pong response with original timestamp for latency calculation
     this.sendMessage({
       type: 'pong',
       timestamp: data.timestamp || Date.now(),
+      pingInterval: this.PING_INTERVAL, // Tell client how often to ping
+      nextPingTime: Date.now() + this.PING_INTERVAL // Help client schedule next ping
     }, rinfo.address, rinfo.port);
   }
 
@@ -273,7 +285,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         flip: { x: 1, y: 1, z: 1 },
         rotation: 0,
         isAlive: true,
-        health: 5, // Default health - customize as needed
+        health: 5,
       };
       this.logger.log(`Player connected: ${playerId} from ${rinfo.address}:${rinfo.port}`);
 
@@ -282,6 +294,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         this.updatePlayerInDatabase(playerId, eventId, roomId);
       }
     }
+
+    // Initialize or update last activity time
+    this.playerLastActivity[playerId] = Date.now();
 
     // Build a list of existing players in the same room
     const existingPlayersList = Object.entries(this.players)
@@ -293,15 +308,17 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         rotation: info.rotation,
         isAlive: info.isAlive,
         health: info.health,
-        bot: false,           // Adjust if you have AI bots
+        bot: false,
         roomId: info.roomId,
       }));
 
-    // A) Acknowledge the new player with current state
+    // A) Acknowledge the new player with current state and ping configuration
     this.sendMessage({
       type: 'connect_ack',
       message: 'Welcome to the server!',
       existingPlayers: existingPlayersList,
+      pingInterval: this.PING_INTERVAL,
+      nextPingTime: Date.now() + this.PING_INTERVAL
     }, rinfo.address, rinfo.port);
 
     // B) Broadcast "spawn" event to all other players in the room
