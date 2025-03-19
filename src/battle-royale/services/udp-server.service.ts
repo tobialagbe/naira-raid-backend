@@ -199,13 +199,15 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       this.playerLastActivity[playerId] = Date.now();
     }
 
+    console.log('ping received', data);
+
     // Send pong response with original timestamp for latency calculation
-    this.sendMessage({
-      type: 'pong',
-      timestamp: data.timestamp || Date.now(),
-      pingInterval: this.PING_INTERVAL, // Tell client how often to ping
-      nextPingTime: Date.now() + this.PING_INTERVAL // Help client schedule next ping
-    }, rinfo.address, rinfo.port);
+    // this.sendMessage({
+    //   type: 'pong',
+    //   timestamp: data.timestamp || Date.now(),
+    //   pingInterval: this.PING_INTERVAL, // Tell client how often to ping
+    //   nextPingTime: Date.now() + this.PING_INTERVAL // Help client schedule next ping
+    // }, rinfo.address, rinfo.port);
   }
 
   /**
