@@ -20,6 +20,7 @@ export class GameSession {
   gameStats: {
     totalKills: number;
     cashCollected: number;
+    colorKills: { [colorId: string]: number };
   };
 
   @Prop({ default: true })

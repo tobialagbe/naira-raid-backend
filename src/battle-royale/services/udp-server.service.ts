@@ -51,9 +51,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Configuration constants
    */
   private readonly UDP_PORT = 41234;
-  private readonly PLAYER_TIMEOUT = 70000;      // 70 seconds inactivity => disconnect
-  private readonly CLEANUP_INTERVAL = 60000;    // 60 seconds interval to check for inactivity
-  private readonly PING_INTERVAL = 30000;       // Clients should ping every 30 seconds
+  private readonly PLAYER_TIMEOUT = 20000;      // 20 seconds inactivity => disconnect
+  private readonly CLEANUP_INTERVAL = 25000;    // 25 seconds interval to check for inactivity
+  private readonly PING_INTERVAL = 5000;       // Clients should ping every 5 seconds
 
   /**
    * Timer for the cleanup interval

@@ -1,23 +1,23 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
-import { DailyMissionsService } from './daily-missions.service';
-import { DailyMissionsController } from './daily-missions.controller';
-import {
-  DailyMission,
-  DailyMissionSchema,
-} from './schemas/daily-mission.schema';
-import {
-  UserMissionProgress,
-  UserMissionProgressSchema,
-} from './schemas/user-mission-progress.schema';
+import { DailyMissionsController } from './controllers/daily-missions.controller';
+import { DailyMissionsService } from './services/daily-missions.service';
+import { MissionDefinition, MissionDefinitionSchema } from './schemas/mission-definition.schema';
+import { MissionProgress, MissionProgressSchema } from './schemas/mission-progress.schema';
+import { MissionPoints, MissionPointsSchema } from './schemas/mission-points.schema';
+import { LeaderboardModule } from '../leaderboard/leaderboard.module';
+import { LeaderboardEntry, LeaderboardEntrySchema } from '../leaderboard/schemas/leaderboard-entry.schema';
 
 @Module({
   imports: [
     ConfigModule,
+    forwardRef(() => LeaderboardModule),
     MongooseModule.forFeature([
-      { name: DailyMission.name, schema: DailyMissionSchema },
-      { name: UserMissionProgress.name, schema: UserMissionProgressSchema },
+      { name: MissionDefinition.name, schema: MissionDefinitionSchema },
+      { name: MissionProgress.name, schema: MissionProgressSchema },
+      { name: MissionPoints.name, schema: MissionPointsSchema },
+      { name: LeaderboardEntry.name, schema: LeaderboardEntrySchema },
     ]),
   ],
   controllers: [DailyMissionsController],
