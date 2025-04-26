@@ -26,6 +26,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * A map of playerId => player data. Stored in memory for quick lookups.
    * Example:
    *   this.players[playerId] = {
+   *     playerId,      // from data
+   *     username,        // from data
    *     address,       // from rinfo
    *     port,          // from rinfo
    *     roomId,
@@ -275,7 +277,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     const playerId = data.playerId;
     const roomId = data.roomId || null;
     const eventId = data.eventId || null;
-
+    const username = data.username || null;
     // If new to this server, store their info
     if (!this.players[playerId]) {
       this.players[playerId] = {
@@ -283,6 +285,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         port: rinfo.port,
         roomId,
         eventId,
+        username,
         position: { x: 0, y: 0, z: 0 },
         flip: { x: 1, y: 1, z: 1 },
         rotation: 0,
@@ -305,6 +308,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       .filter(([pid, info]) => info.roomId === roomId)
       .map(([pid, info]) => ({
         playerId: pid,
+        username: info.username,
         position: info.position,
         flip: info.flip,
         rotation: info.rotation,
@@ -327,11 +331,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.broadcastExcept({
       type: 'spawn',
       playerId: playerId,
+      username: username,
       position: { x: 0, y: 0, z: 0 },
       flip: { x: 1, y: 1, z: 1 },
       rotation: 0,
       isAlive: true,
-      health: 5,
+      health: 20,
       bot: false,
       roomId: roomId,
     }, playerId, roomId);
