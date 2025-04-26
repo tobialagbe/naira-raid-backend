@@ -26,8 +26,8 @@ import { DatabaseModule } from './database/database.module';
         const uri = configService.get<string>('MONGODB_URI');
         return {
           uri: uri + '/test',
-          useNewUrlParser: true,
-          useUnifiedTopology: true,
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
         };
       },
       inject: [ConfigService],

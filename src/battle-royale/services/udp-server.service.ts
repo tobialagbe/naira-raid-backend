@@ -287,7 +287,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         flip: { x: 1, y: 1, z: 1 },
         rotation: 0,
         isAlive: true,
-        health: 5,
+        health: 20,
       };
       this.logger.log(`Player connected: ${playerId} from ${rinfo.address}:${rinfo.port}`);
 
@@ -430,14 +430,14 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     player.health = Math.max(0, player.health - data.damage);
 
     // Check if death occurred
-    if (player.health <= 0) {
-      player.isAlive = false;
+    // if (player.health <= 0) {
+    //   player.isAlive = false;
 
-      // Update DB if it's a Battle Royale event
-      if (player.eventId) {
-        this.updatePlayerDeathInDatabase(playerId, player.eventId, data.position || 0);
-      }
-    }
+    //   // Update DB if it's a Battle Royale event
+    //   if (player.eventId) {
+    //     this.updatePlayerDeathInDatabase(playerId, player.eventId, data.position || 0);
+    //   }
+    // }
 
     // Broadcast damage to other players
     this.broadcastExcept({
