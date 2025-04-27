@@ -358,6 +358,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.broadcastExcept({
       type: 'move',
       playerId: playerId,
+      username: player.username,
+      bot: player.bot,
+      health: player.health,
       position: data.position,
     }, playerId, player.roomId);
   }
@@ -377,6 +380,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.broadcastExcept({
       type: 'flip',
       playerId: playerId,
+      username: player.username,
+      bot: player.bot,
+      health: player.health,
       flip: data.localScale,
     }, playerId, player.roomId);
   }
@@ -396,6 +402,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.broadcastExcept({
       type: 'rotate',
       playerId: playerId,
+      username: player.username,
+      bot: player.bot,
+      health: player.health,
       rotation: data.rotation,
     }, playerId, player.roomId);
   }
@@ -415,6 +424,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.broadcastExcept({
       type: 'attack',
       playerId: playerId,
+      username: player.username,
+      bot: player.bot,
+      health: player.health,
       shootPoint: data.shootPoint || { x: 0, y: 0, z: 0 },
       shootDirection: data.shootDirection || { x: 0, y: 0 },
     }, playerId, player.roomId);
@@ -448,6 +460,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.broadcastExcept({
       type: 'damage',
       playerId: playerId,
+      username: player.username,
+      bot: player.bot,
+      health: player.health,
       damage: data.damage,
       shooterId: data.shooterId,
       currentHealth: player.health,
