@@ -177,4 +177,39 @@ export class AuthService {
       refresh_token: newRefreshToken,
     };
   }
+
+  async checkAndRefreshToken(accessToken: string, refreshToken: string) {
+    try {
+      // Verify access token. If valid we simply return it.
+      this.jwtService.verify(accessToken);
+      return { access_token: accessToken };
+    } catch (err) {
+      // Access token invalid or expired. Attempt refresh.
+      const tokenData = this.refreshTokens.get(refreshToken);
+      if (!tokenData || tokenData.expires < new Date()) {
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
+
+      const user = await this.userService.findById(tokenData.userId);
+      if (!user) {
+        throw new BadRequestException('User not found');
+      }
+
+      const payload = { email: user.email, sub: user._id };
+      const newAccessToken = this.jwtService.sign(payload);
+      const newRefreshToken = uuidv4();
+
+      // Replace old refresh token
+      this.refreshTokens.delete(refreshToken);
+      this.refreshTokens.set(newRefreshToken, {
+        userId: user._id.toString(),
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
+
+      return {
+        access_token: newAccessToken,
+        refresh_token: newRefreshToken,
+      };
+    }
+  }
 }

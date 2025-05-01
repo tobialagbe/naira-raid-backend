@@ -8,6 +8,7 @@ import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { CheckTokenDto } from './dto/check-token.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -103,5 +104,13 @@ export class AuthController {
   })
   async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
     return this.authService.refreshToken(refreshTokenDto);
+  }
+
+  @Post('check-token')
+  @ApiOperation({ summary: 'Check if access token is valid and refresh if expired' })
+  @ApiBody({ type: CheckTokenDto })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns a valid access token (and possibly new refresh token).' })
+  async checkToken(@Body() body: CheckTokenDto) {
+    return this.authService.checkAndRefreshToken(body.accessToken, body.refreshToken);
   }
 }

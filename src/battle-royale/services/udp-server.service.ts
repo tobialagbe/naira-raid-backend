@@ -50,6 +50,14 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
   private playerLastActivity: Record<string, number> = {};
 
   /**
+   * cashObjects
+   * -----------
+   * Track spawned cash objects by ID to avoid duplicates.
+   * Structure: { [cashId]: { position: {x,y,z}, roomId?: string, eventId?: string } }
+   */
+  private cashObjects: Record<string, { position: any; roomId?: string; eventId?: string }> = {};
+
+  /**
    * Configuration constants
    */
   private readonly UDP_PORT = 41234;
@@ -157,6 +165,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
             break;
           case 'disconnect':
             this.handleDisconnect(data, rinfo);
+            break;
+          case 'cash_spawn':
+            this.handleCashSpawn(data);
+            break;
+          case 'cash_collected':
+            this.handleCashCollected(data);
             break;
           default:
             // Use template string for clarity in logs
@@ -303,9 +317,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     // Initialize or update last activity time
     this.playerLastActivity[playerId] = Date.now();
 
-    // Build a list of existing players in the same room
+    // Build a list of existing players in the same room AND event
     const existingPlayersList = Object.entries(this.players)
-      .filter(([pid, info]) => info.roomId === roomId)
+      .filter(([pid, info]) => info.roomId === roomId && info.eventId === eventId)
       .map(([pid, info]) => ({
         playerId: pid,
         username: info.username,
@@ -316,6 +330,15 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         health: info.health,
         bot: false,
         roomId: info.roomId,
+        eventId: info.eventId,
+      }));
+
+    // Build a list of existing cash objects in the same room AND event
+    const existingCashList = Object.entries(this.cashObjects)
+      .filter(([cid, cinfo]) => cinfo.roomId === roomId && cinfo.eventId === eventId)
+      .map(([cid, cinfo]) => ({
+        cashId: cid,
+        position: cinfo.position,
       }));
 
     // A) Acknowledge the new player with current state and ping configuration
@@ -323,11 +346,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       type: 'connect_ack',
       message: 'Welcome to the server!',
       existingPlayers: existingPlayersList,
+      existingCash: existingCashList,
       pingInterval: this.PING_INTERVAL,
       nextPingTime: Date.now() + this.PING_INTERVAL
     }, rinfo.address, rinfo.port);
 
-    // B) Broadcast "spawn" event to all other players in the room
+    // B) Broadcast "spawn" event to all other players in the room AND event
     this.broadcastExcept({
       type: 'spawn',
       playerId: playerId,
@@ -339,7 +363,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       health: 20,
       bot: false,
       roomId: roomId,
-    }, playerId, roomId);
+      eventId: eventId,
+    }, playerId, roomId, eventId);
   }
 
   /**
@@ -354,7 +379,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     player.position = data.position;
 
-    // Broadcast movement to others in the room
+    // Broadcast movement to others in the room AND event
     this.broadcastExcept({
       type: 'move',
       playerId: playerId,
@@ -362,7 +387,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       bot: player.bot,
       health: player.health,
       position: data.position,
-    }, playerId, player.roomId);
+    }, playerId, player.roomId, player.eventId);
   }
 
   /**
@@ -384,7 +409,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       bot: player.bot,
       health: player.health,
       flip: data.localScale,
-    }, playerId, player.roomId);
+    }, playerId, player.roomId, player.eventId);
   }
 
   /**
@@ -406,7 +431,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       bot: player.bot,
       health: player.health,
       rotation: data.rotation,
-    }, playerId, player.roomId);
+    }, playerId, player.roomId, player.eventId);
   }
 
   /**
@@ -429,7 +454,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       health: player.health,
       shootPoint: data.shootPoint || { x: 0, y: 0, z: 0 },
       shootDirection: data.shootDirection || { x: 0, y: 0 },
-    }, playerId, player.roomId);
+    }, playerId, player.roomId, player.eventId);
   }
 
   /**
@@ -466,7 +491,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       damage: data.damage,
       shooterId: data.shooterId,
       currentHealth: player.health,
-    }, playerId, player.roomId);
+    }, playerId, player.roomId, player.eventId);
   }
 
   /**
@@ -486,11 +511,11 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       this.updatePlayerDeathInDatabase(playerId, player.eventId, data.position || 0);
     }
 
-    // Broadcast "death" to others in the room
+    // Broadcast "death" to others in the room AND event
     this.broadcastExcept({
       type: 'death',
       playerId: playerId,
-    }, playerId, player.roomId);
+    }, playerId, player.roomId, player.eventId);
   }
 
   /**
@@ -505,15 +530,16 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     if (!player) return;
 
     const roomId = player.roomId;
+    const eventId = player.eventId;
     
     // Log the clean disconnect
     this.logger.log(`Player ${playerId} disconnected cleanly`);
 
-    // Broadcast disconnect to other players in the room
+    // Broadcast disconnect to other players in the room AND event
     this.broadcastExcept({
       type: 'disconnect',
       playerId: playerId,
-    }, playerId, roomId);
+    }, playerId, roomId, eventId);
 
     // If this was a Battle Royale event player, update their status
     if (player.eventId) {
@@ -528,20 +554,21 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
   /**
    * broadcastExcept
    * ---------------
-   * Sends a message to all players in the same room EXCEPT the given playerId.
+   * Sends a message to all players in the same room AND event EXCEPT the given playerId.
    */
-  private broadcastExcept(msgObj: any, exceptPlayerId: string, roomId: string | null = null) {
+  private broadcastExcept(msgObj: any, exceptPlayerId: string, roomId: string | null = null, eventId: string | null = null) {
     let broadcastCount = 0;
     for (const [pid, info] of Object.entries(this.players)) {
       if (pid === exceptPlayerId) continue;
       if (roomId && info.roomId !== roomId) continue;
+      if (eventId && info.eventId !== eventId) continue;
 
       // Debug-level logging for each broadcast
       this.logger.debug(`Broadcasting to ${pid} at ${info.address}:${info.port}`);
       this.sendMessage(msgObj, info.address, info.port);
       broadcastCount++;
     }
-    this.logger.log(`Broadcasted '${msgObj.type}' to ${broadcastCount} players in room ${roomId}`);
+    this.logger.log(`Broadcasted '${msgObj.type}' to ${broadcastCount} players in room ${roomId} of event ${eventId}`);
   }
 
   /**
@@ -601,5 +628,91 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} death in database:`, error);
     }
+  }
+
+  /**
+   * handleCashSpawn
+   * ---------------
+   * Broadcasts a "cash_spawn" event to all players so they instantiate the cash object.
+   * Ensures each cashId is only processed once.
+   */
+  private handleCashSpawn(data: any) {
+    const cashId = data.cashId;
+    const position = data.position;
+    const playerId = data.playerId;
+    // Client must provide eventId for cash objects
+    const eventId = data.eventId;
+    
+    if (!cashId) {
+      this.logger.warn('Received cash_spawn without cashId');
+      return;
+    }
+
+    // Determine room and event based on spawning player
+    const roomId = playerId && this.players[playerId] ? this.players[playerId].roomId : null;
+    const playerEventId = playerId && this.players[playerId] ? this.players[playerId].eventId : null;
+    
+    // Use provided eventId or player's eventId
+    const finalEventId = eventId || playerEventId;
+
+    // Store if not already
+    if (!this.cashObjects[cashId]) {
+      this.cashObjects[cashId] = { position, roomId, eventId: finalEventId };
+    }
+
+    // Broadcast to players in the same room AND event
+    this.broadcastExcept(
+      {
+        type: 'cash_spawn',
+        cashId: cashId,
+        position: position,
+        playerId: playerId,
+        eventId: finalEventId,
+      },
+      playerId,
+      roomId,
+      finalEventId,
+    );
+  }
+
+  /**
+   * handleCashCollected
+   * -------------------
+   * Broadcasts a "cash_collected" event and removes it from internal map.
+   */
+  private handleCashCollected(data: any) {
+    const cashId = data.cashId;
+    const playerId = data.playerId;
+    // Client can provide eventId for better routing
+    const eventId = data.eventId;
+    
+    if (!cashId) {
+      this.logger.warn('Received cash_collected without cashId');
+      return;
+    }
+
+    // Get room and event from either cash object or player info
+    const storedCash = this.cashObjects[cashId] || { roomId: null, eventId: null };
+    const roomId = storedCash.roomId || (playerId && this.players[playerId] ? this.players[playerId].roomId : null);
+    const playerEventId = playerId && this.players[playerId] ? this.players[playerId].eventId : null;
+    
+    // Use stored cash eventId, provided eventId, or player's eventId
+    const finalEventId = storedCash.eventId || eventId || playerEventId;
+
+    // Remove from cache map
+    delete this.cashObjects[cashId];
+
+    // Broadcast to players in the same room AND event
+    this.broadcastExcept(
+      {
+        type: 'cash_collected',
+        cashId: cashId,
+        playerId: playerId,
+        eventId: finalEventId,
+      },
+      playerId,
+      roomId,
+      finalEventId,
+    );
   }
 }

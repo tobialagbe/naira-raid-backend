@@ -32,12 +32,28 @@ export class BattleRoyaleService {
    */
   async getEvents(status?: string) {
     const query: any = {};
-    
     if (status) {
       query.status = status;
     }
-    
-    return this.eventModel.find(query).sort({ eventDate: 1, startTime: 1 }).exec();
+
+    // Fetch events and convert to plain JS objects
+    const events = await this.eventModel
+      .find(query)
+      .sort({ eventDate: 1, startTime: 1 })
+      .lean()
+      .exec();
+
+    // Attach number of registered participants to each event
+    const eventsWithParticipants = await Promise.all(
+      events.map(async (event) => {
+        const registeredParticipants = await this.playerModel.countDocuments({
+          eventId: event._id,
+        });
+        return { ...event, registeredParticipants };
+      }),
+    );
+
+    return eventsWithParticipants;
   }
 
   /**
@@ -45,21 +61,25 @@ export class BattleRoyaleService {
    */
   async getLatestUpcomingEvent() {
     const now = new Date();
-    
-    // Find the next event that's scheduled after now
-    const upcomingEvents = await this.eventModel.find({
-      eventDate: { $gte: now },
-      status: 'upcoming'
-    })
-    .sort({ eventDate: 1, startTime: 1 })
-    .limit(1)
-    .exec();
-    
-    if (upcomingEvents.length === 0) {
+
+    const upcomingEvent = await this.eventModel
+      .findOne({
+        eventDate: { $gte: now },
+        status: 'upcoming',
+      })
+      .sort({ eventDate: 1, startTime: 1 })
+      .lean()
+      .exec();
+
+    if (!upcomingEvent) {
       throw new NotFoundException('No upcoming events found');
     }
-    
-    return upcomingEvents[0];
+
+    const registeredParticipants = await this.playerModel.countDocuments({
+      eventId: upcomingEvent._id,
+    });
+
+    return { ...upcomingEvent, registeredParticipants };
   }
 
   /**
@@ -212,5 +232,47 @@ export class BattleRoyaleService {
     
     // Players are sorted by position (1 is winner, 2 is second place, etc.)
     return players;
+  }
+
+  /**
+   * Get the closest upcoming event a user is registered for
+   */
+  async getClosestUpcomingEventForUser(userId: string) {
+    const now = new Date();
+    const userIdObj = new Types.ObjectId(userId.toString());
+
+    // Fetch all event IDs the user is registered for
+    const registrations = await this.playerModel
+      .find({ userId: userIdObj })
+      .select('eventId')
+      .lean();
+
+    const eventIds = registrations.map((r) => r.eventId);
+
+    if (eventIds.length === 0) {
+      throw new NotFoundException('User is not registered for any events');
+    }
+
+    // Find the closest upcoming event among the registered ones
+    const upcomingEvent = await this.eventModel
+      .findOne({
+        _id: { $in: eventIds },
+        status: 'upcoming',
+        eventDate: { $gte: now },
+      })
+      .sort({ eventDate: 1, startTime: 1 })
+      .lean()
+      .exec();
+
+    if (!upcomingEvent) {
+      throw new NotFoundException('No upcoming registered events found');
+    }
+
+    // Attach participant count
+    const registeredParticipants = await this.playerModel.countDocuments({
+      eventId: upcomingEvent._id,
+    });
+
+    return { ...upcomingEvent, registeredParticipants };
   }
 } 

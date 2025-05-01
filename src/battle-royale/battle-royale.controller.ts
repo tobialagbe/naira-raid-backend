@@ -91,4 +91,11 @@ export class BattleRoyaleController {
   getEventLeaderboard(@Param('id') id: string) {
     return this.battleRoyaleService.getEventLeaderboard(id);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('events/upcoming/registered')
+  @ApiOperation({ summary: 'Get the closest upcoming Battle Royale event the authenticated user is registered for' })
+  getClosestRegisteredUpcomingEvent(@Request() req) {
+    return this.battleRoyaleService.getClosestUpcomingEventForUser(req.user.userId);
+  }
 } 
