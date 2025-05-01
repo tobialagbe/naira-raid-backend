@@ -506,10 +506,30 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     player.isAlive = false;
 
+    // Calculate player's rank/position (players left + 1)
+    const playersLeft = Object.values(this.players).filter(
+      (p: any) => p.isAlive && p.roomId === player.roomId && p.eventId === player.eventId
+    ).length;
+    
+    const playerRank = playersLeft + 1;
+    this.logger.log(`Player ${playerId} died with rank ${playerRank}, cash collected: ${player.cashCollected || 0}`);
+
     // Update database for an official death
     if (player.eventId) {
-      this.updatePlayerDeathInDatabase(playerId, player.eventId, data.position || 0);
+      this.updatePlayerDeathInDatabase(playerId, player.eventId, playerRank);
     }
+
+    // Send death stats directly to the player who died
+    this.sendMessage(
+      {
+        type: 'death_stats',
+        playerId: playerId,
+        rank: playerRank,
+        cashCollected: player.cashCollected || 0, 
+      },
+      player.address, 
+      player.port
+    );
 
     // Broadcast "death" to others in the room AND event
     this.broadcastExcept({
@@ -685,10 +705,24 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     const playerId = data.playerId;
     // Client can provide eventId for better routing
     const eventId = data.eventId;
+    // Optional cash amount value (default to 300)
+    const cashAmount = 300;
     
     if (!cashId) {
       this.logger.warn('Received cash_collected without cashId');
       return;
+    }
+
+    // Track cash collected by player
+    if (playerId && this.players[playerId]) {
+      // Initialize cash counter if not present
+      if (typeof this.players[playerId].cashCollected !== 'number') {
+        this.players[playerId].cashCollected = 0;
+      }
+      
+      // Add cash to player's total
+      this.players[playerId].cashCollected += cashAmount;
+      this.logger.log(`Player ${playerId} collected cash: +${cashAmount}, total: ${this.players[playerId].cashCollected}`);
     }
 
     // Get room and event from either cash object or player info
@@ -709,6 +743,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         cashId: cashId,
         playerId: playerId,
         eventId: finalEventId,
+        cashAmount: cashAmount,
       },
       playerId,
       roomId,
