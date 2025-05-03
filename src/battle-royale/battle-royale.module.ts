@@ -7,6 +7,7 @@ import { UdpServerService } from './services/udp-server.service';
 import { BattleRoyaleEvent, BattleRoyaleEventSchema } from './schemas/battle-royale-event.schema';
 import { BattleRoyalePlayer, BattleRoyalePlayerSchema } from './schemas/battle-royale-player.schema';
 import { UserModule } from '../user/user.module';
+import { WebSocketServerService } from './services/websocket-server.service';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { UserModule } from '../user/user.module';
     ]),
   ],
   controllers: [BattleRoyaleController],
-  providers: [BattleRoyaleService, UdpServerService],
+  providers: [BattleRoyaleService, UdpServerService, WebSocketServerService],
   exports: [BattleRoyaleService],
 })
 export class BattleRoyaleModule {} 
