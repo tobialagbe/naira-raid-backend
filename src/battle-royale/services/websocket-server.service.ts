@@ -93,11 +93,13 @@ export class WebSocketServerService implements OnModuleInit, OnModuleDestroy {
 
   // ---------------------------------------------------------------------------
   private handleRawMessage(ws: WebSocket, raw: WebSocket.RawData): void {
+    const peer = (ws as any)._socket?.remoteAddress ?? 'unknown';
+    this.logger.verbose(`[RX ${peer}] ${raw.toString()}`);
     try {
       const data = JSON.parse(raw.toString());
       const playerId = data.playerId;
 
-    //   console.log("received message", JSON.stringify(data));
+      console.log("received message", JSON.stringify(data));
 
       // Record socket & remote info once we know the playerId
       if (playerId) {
@@ -136,66 +138,80 @@ export class WebSocketServerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private handleConnect(data: any, ws: WebSocket): void {
-    const { playerId, roomId = null, eventId = null, username = null } = data;
-    if (!this.players[playerId]) {
-      const { remoteAddress: address, remotePort: port } = (ws as any)._socket;
-      this.players[playerId] = {
-        ws,
-        address,
-        port,
-        roomId,
-        eventId,
-        username,
-        position: { x: 0, y: 0, z: 0 },
-        flip: { x: 1, y: 1, z: 1 },
-        rotation: 0,
-        isAlive: true,
-        health: 20,
-      };
-      this.logger.log(`Player connected: ${playerId}`);
+    try{
 
-      if (eventId && roomId) this.updatePlayerInDatabase(playerId, eventId, roomId);
+        const { playerId, roomId = null, eventId = null, username = null } = data;
+        if (!this.players[playerId]) {
+          const { remoteAddress: address, remotePort: port } = (ws as any)._socket;
+          this.players[playerId] = {
+            ws,
+            address,
+            port,
+            roomId,
+            eventId,
+            username,
+            position: { x: 0, y: 0, z: 0 },
+            flip: { x: 1, y: 1, z: 1 },
+            rotation: 0,
+            isAlive: true,
+            health: 20,
+          };
+          this.logger.log(`Player connected: ${playerId}`);
+    
+          if (eventId && roomId) this.updatePlayerInDatabase(playerId, eventId, roomId);
+        }
+    
+        const existingPlayers = Object.entries(this.players)
+          .filter(([, info]) => info.roomId === roomId && info.eventId === eventId)
+          .map(([pid, info]) => ({
+            playerId: pid,
+            username: info.username,
+            position: info.position,
+            flip: info.flip,
+            rotation: info.rotation,
+            isAlive: info.isAlive,
+            health: info.health,
+            bot: false,
+          }));
+    
+        const existingCash = Object.entries(this.cashObjects)
+          .filter(([, c]) => c.roomId === roomId && c.eventId === eventId)
+          .map(([cid, c]) => ({ cashId: cid, position: c.position }));
+    
+        // ACK to new player
+        this.sendMessage(ws, {
+          type: 'connect_ack',
+          message: 'Welcome!',
+          existingPlayers,
+          existingCash,
+          pingInterval: this.PING_INTERVAL,
+          nextPingTime: Date.now() + this.PING_INTERVAL,
+        });
+    
+        // Broadcast spawn to others
+        this.broadcastExcept(playerId, roomId, eventId, {
+          type: 'spawn',
+          playerId,
+          username,
+          position: { x: 0, y: 0, z: 0 },
+          flip: { x: 1, y: 1, z: 1 },
+          rotation: 0,
+          isAlive: true,
+          health: 20,
+          bot: false,
+        });
+
+    }catch(err:any){
+         this.logger.error(`handleConnect error: ${err.message}`);
+         this.logger.error(`handleConnect fatal: ${err.stack || err}`);
+         this.sendMessage(ws, {
+           type:    'error',
+           context: 'connect',
+           reason:  err.message ?? 'unknown',
+         });
+         ws.close(4001, 'connect_error');
     }
 
-    const existingPlayers = Object.entries(this.players)
-      .filter(([, info]) => info.roomId === roomId && info.eventId === eventId)
-      .map(([pid, info]) => ({
-        playerId: pid,
-        username: info.username,
-        position: info.position,
-        flip: info.flip,
-        rotation: info.rotation,
-        isAlive: info.isAlive,
-        health: info.health,
-        bot: false,
-      }));
-
-    const existingCash = Object.entries(this.cashObjects)
-      .filter(([, c]) => c.roomId === roomId && c.eventId === eventId)
-      .map(([cid, c]) => ({ cashId: cid, position: c.position }));
-
-    // ACK to new player
-    this.sendMessage(ws, {
-      type: 'connect_ack',
-      message: 'Welcome!',
-      existingPlayers,
-      existingCash,
-      pingInterval: this.PING_INTERVAL,
-      nextPingTime: Date.now() + this.PING_INTERVAL,
-    });
-
-    // Broadcast spawn to others
-    this.broadcastExcept(playerId, roomId, eventId, {
-      type: 'spawn',
-      playerId,
-      username,
-      position: { x: 0, y: 0, z: 0 },
-      flip: { x: 1, y: 1, z: 1 },
-      rotation: 0,
-      isAlive: true,
-      health: 20,
-      bot: false,
-    });
   }
 
   private handleMove(data: any): void {
@@ -296,9 +312,27 @@ export class WebSocketServerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private sendMessage(ws: WebSocket, obj: any): void {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+//   private sendMessage(ws: WebSocket, obj: any): void {
+//     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+//   }
+
+// ---------------------------------------------------------------------------
+private sendMessage(ws: WebSocket, obj: any): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
+  
+    const txt = JSON.stringify(obj);
+  
+    try {
+      ws.send(txt);
+    //   this.logger.verbose(`[TX ${(ws as any)._socket.remoteAddress}] ${txt}`);
+      this.logger.log(`[TX ${(ws as any)._socket.remoteAddress}] ${txt}`);
+    } catch (e: any) {
+      this.logger.error(`Send failed: ${e.message || e}`);
+      // optional: close so the client sees a specific code
+      ws.close(4002, 'send_failed');
+    }
   }
+  
 
   // ---------------------------------------------------------------------------
   private cleanupDisconnectedPlayers(): void {

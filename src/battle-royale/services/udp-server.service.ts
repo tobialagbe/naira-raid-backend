@@ -163,11 +163,14 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
           case 'death':
             this.handleDeath(data, rinfo);
             break;
+          case 'game_end':
+            this.handleGameEnd(data, rinfo);
+            break;
           case 'disconnect':
             this.handleDisconnect(data, rinfo);
             break;
-          case 'cash_spawn':
-            this.handleCashSpawn(data);
+          // case 'cash_spawn':
+          //   this.handleCashSpawn(data);
             break;
           case 'cash_collected':
             this.handleCashCollected(data);
@@ -531,11 +534,120 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       player.port
     );
 
+    // Store the cash amount before resetting it to include in the broadcast
+    const cashCollected = player.cashCollected || 0;
+    
+    // Only spawn cash if the player had collected some
+    if (cashCollected > 0) {
+      // Generate a unique cash ID using player ID and timestamp
+      const cashId = `${playerId}_death_${Date.now()}`;
+      
+      // Store in cash objects map
+      this.cashObjects[cashId] = { 
+        position: player.position, 
+        roomId: player.roomId, 
+        eventId: player.eventId 
+      };
+      
+      // Broadcast cash spawn to all players in the room including the one who died
+      this.broadcastExcept({
+        type: 'cash_spawn',
+        cashId: cashId,
+        position: player.position,
+        cashAmount: cashCollected,
+        playerId: playerId,
+        eventId: player.eventId,
+      }, '', player.roomId, player.eventId); // Empty string means broadcast to everyone
+    }
+    
+    // Reset the player's cash to 0 after death
+    player.cashCollected = 0;
+
     // Broadcast "death" to others in the room AND event
     this.broadcastExcept({
       type: 'death',
       playerId: playerId,
+      cashCollected: cashCollected,
     }, playerId, player.roomId, player.eventId);
+  }
+
+  /**
+   * handleGameEnd
+   * -----------
+   * Handles an explicit "game_end" event from the client (they've made it to the end of the game).
+   * Unlike death, the player's cash is preserved and they're marked as a winner.
+   */
+  private handleGameEnd(data: any, rinfo: dgram.RemoteInfo) {
+    const playerId = data.playerId;
+    const player = this.players[playerId];
+    if (!player) return;
+
+    // Player remains alive but game is complete
+    const playerRank = 1; // They made it to the end, so they're #1
+    this.logger.log(`Player ${playerId} completed the game with rank ${playerRank}, cash collected: ${player.cashCollected || 0}`);
+
+    // Update database with winner status
+    if (player.eventId) {
+      this.updatePlayerWinInDatabase(playerId, player.eventId, playerRank);
+    }
+
+    // Send game end stats directly to the player
+    this.sendMessage(
+      {
+        type: 'game_end_stats',
+        playerId: playerId,
+        rank: playerRank,
+        cashCollected: player.cashCollected || 0, 
+      },
+      player.address, 
+      player.port
+    );
+
+    // Broadcast "game_end" to others in the room AND event
+    this.broadcastExcept({
+      type: 'game_end',
+      playerId: playerId,
+    }, playerId, player.roomId, player.eventId);
+  }
+
+  /**
+   * updatePlayerDeathInDatabase
+   * ---------------------------
+   * Example function to mark a player as 'eliminated' or 'winner' in the database.
+   */
+  private async updatePlayerDeathInDatabase(playerId: string, eventId: string, position: number) {
+    // try {
+    //   await this.playerModel.findOneAndUpdate(
+    //     { userId: playerId, eventId },
+    //     {
+    //       status: position === 1 ? 'winner' : 'eliminated',
+    //       isAlive: false,
+    //       position: position,
+    //     },
+    //   );
+    // } catch (error) {
+    //   this.logger.error(`Failed to update player ${playerId} death in database:`, error);
+    // }
+  }
+
+  /**
+   * updatePlayerWinInDatabase
+   * ---------------------------
+   * Marks a player as a 'winner' in the database and preserves their position.
+   */
+  private async updatePlayerWinInDatabase(playerId: string, eventId: string, position: number) {
+    // try {
+    //   await this.playerModel.findOneAndUpdate(
+    //     { userId: playerId, eventId },
+    //     {
+    //       status: 'winner',
+    //       isAlive: true,
+    //       position: position,
+    //     },
+    //   );
+    // } catch (error) {
+    //   this.logger.error(`Failed to update player ${playerId} win in database:`, error);
+    // }
   }
 
   /**
@@ -631,69 +743,49 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * updatePlayerDeathInDatabase
-   * ---------------------------
-   * Example function to mark a player as 'eliminated' or 'winner' in the database.
-   */
-  private async updatePlayerDeathInDatabase(playerId: string, eventId: string, position: number) {
-    try {
-      await this.playerModel.findOneAndUpdate(
-        { userId: playerId, eventId },
-        {
-          status: position === 1 ? 'winner' : 'eliminated',
-          isAlive: false,
-          position: position,
-        },
-      );
-    } catch (error) {
-      this.logger.error(`Failed to update player ${playerId} death in database:`, error);
-    }
-  }
-
-  /**
    * handleCashSpawn
    * ---------------
    * Broadcasts a "cash_spawn" event to all players so they instantiate the cash object.
    * Ensures each cashId is only processed once.
    */
-  private handleCashSpawn(data: any) {
-    const cashId = data.cashId;
-    const position = data.position;
-    const playerId = data.playerId;
-    // Client must provide eventId for cash objects
-    const eventId = data.eventId;
+  // private handleCashSpawn(data: any) {
+  //   const cashId = data.cashId;
+  //   const position = data.position;
+  //   const playerId = data.playerId;
+  //   // Client must provide eventId for cash objects
+  //   const eventId = data.eventId;
     
-    if (!cashId) {
-      this.logger.warn('Received cash_spawn without cashId');
-      return;
-    }
+  //   if (!cashId) {
+  //     this.logger.warn('Received cash_spawn without cashId');
+  //     return;
+  //   }
 
-    // Determine room and event based on spawning player
-    const roomId = playerId && this.players[playerId] ? this.players[playerId].roomId : null;
-    const playerEventId = playerId && this.players[playerId] ? this.players[playerId].eventId : null;
+  //   // Determine room and event based on spawning player
+  //   const roomId = playerId && this.players[playerId] ? this.players[playerId].roomId : null;
+  //   const playerEventId = playerId && this.players[playerId] ? this.players[playerId].eventId : null;
     
-    // Use provided eventId or player's eventId
-    const finalEventId = eventId || playerEventId;
+  //   // Use provided eventId or player's eventId
+  //   const finalEventId = eventId || playerEventId;
 
-    // Store if not already
-    if (!this.cashObjects[cashId]) {
-      this.cashObjects[cashId] = { position, roomId, eventId: finalEventId };
-    }
+  //   // Store if not already
+  //   if (!this.cashObjects[cashId]) {
+  //     this.cashObjects[cashId] = { position, roomId, eventId: finalEventId };
+  //   }
 
-    // Broadcast to players in the same room AND event
-    this.broadcastExcept(
-      {
-        type: 'cash_spawn',
-        cashId: cashId,
-        position: position,
-        playerId: playerId,
-        eventId: finalEventId,
-      },
-      playerId,
-      roomId,
-      finalEventId,
-    );
-  }
+  //   // Broadcast to players in the same room AND event
+  //   this.broadcastExcept(
+  //     {
+  //       type: 'cash_spawn',
+  //       cashId: cashId,
+  //       position: position,
+  //       playerId: playerId,
+  //       eventId: finalEventId,
+  //     },
+  //     playerId,
+  //     roomId,
+  //     finalEventId,
+  //   );
+  // }
 
   /**
    * handleCashCollected
