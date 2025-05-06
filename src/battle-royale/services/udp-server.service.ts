@@ -549,15 +549,24 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         eventId: player.eventId 
       };
       
-      // Broadcast cash spawn to all players in the room including the one who died
-      this.broadcastExcept({
-        type: 'cash_spawn',
-        cashId: cashId,
-        position: player.position,
-        cashAmount: cashCollected,
-        playerId: playerId,
-        eventId: player.eventId,
-      }, '', player.roomId, player.eventId); // Empty string means broadcast to everyone
+      this.logger.log(`Spawning cash at death: ID=${cashId}, Amount=${cashCollected}, Position=${JSON.stringify(player.position)}`);
+      
+      // Broadcast cash spawn to all players in the room
+      // Use direct broadcast to each player instead of broadcastExcept with empty string
+      for (const [pid, info] of Object.entries(this.players)) {
+        // Only send to players in the same room and event
+        if (info.roomId === player.roomId && info.eventId === player.eventId) {
+          this.logger.log(`Sending cash_spawn to player ${pid}`);
+          this.sendMessage({
+            type: 'cash_spawn',
+            cashId: cashId,
+            position: player.position,
+            cashAmount: cashCollected,
+            playerId: playerId,
+            eventId: player.eventId,
+          }, info.address, info.port);
+        }
+      }
     }
     
     // Reset the player's cash to 0 after death
