@@ -57,29 +57,50 @@ export class BattleRoyaleService {
   }
 
   /**
-   * Get the latest upcoming event
+   * Get the latest 5 upcoming events with registration status
    */
-  async getLatestUpcomingEvent() {
+  async getLatestUpcomingEvent(userId?: string) {
     const now = new Date();
 
-    const upcomingEvent = await this.eventModel
-      .findOne({
+    const upcomingEvents = await this.eventModel
+      .find({
         eventDate: { $gte: now },
         status: 'upcoming',
       })
       .sort({ eventDate: 1, startTime: 1 })
+      .limit(5)
       .lean()
       .exec();
 
-    if (!upcomingEvent) {
+    if (!upcomingEvents.length) {
       throw new NotFoundException('No upcoming events found');
     }
 
-    const registeredParticipants = await this.playerModel.countDocuments({
-      eventId: upcomingEvent._id,
-    });
+    // Get registration status for each event
+    const eventsWithParticipants = await Promise.all(
+      upcomingEvents.map(async (event) => {
+        const registeredParticipants = await this.playerModel.countDocuments({
+          eventId: event._id,
+        });
 
-    return { ...upcomingEvent, registeredParticipants };
+        let isRegistered = false;
+        if (userId) {
+          const registration = await this.playerModel.findOne({
+            userId: new Types.ObjectId(userId),
+            eventId: event._id,
+          });
+          isRegistered = !!registration;
+        }
+
+        return { 
+          ...event, 
+          registeredParticipants,
+          isRegistered
+        };
+      })
+    );
+
+    return eventsWithParticipants;
   }
 
   /**

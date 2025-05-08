@@ -47,6 +47,12 @@ export class BattleRoyalePlayer {
 
   @Prop({ default: true })
   isAlive: boolean;
+
+  @Prop({ default: 0 })
+  cashWon: number;
+
+  @Prop({ default: false })
+  cashWithdrawn: boolean;
 }
 
 export const BattleRoyalePlayerSchema = SchemaFactory.createForClass(BattleRoyalePlayer); 

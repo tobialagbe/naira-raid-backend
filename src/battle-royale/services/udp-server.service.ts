@@ -308,8 +308,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         rotation: 0,
         isAlive: true,
         health: 20,
+        cashCollected: 300, // Initialize with 300 cash
       };
-      this.logger.log(`Player connected: ${playerId} from ${rinfo.address}:${rinfo.port}`);
+      this.logger.log(`Player connected: ${playerId} from ${rinfo.address}:${rinfo.port} with initial cash: 300`);
 
       // Update the player's roomId/status in DB if eventId is provided
       if (eventId && roomId) {
@@ -334,6 +335,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         bot: false,
         roomId: info.roomId,
         eventId: info.eventId,
+        cashCollected: info.cashCollected || 0, // Include cash in player data
       }));
 
     // Build a list of existing cash objects in the same room AND event
@@ -552,7 +554,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`Spawning cash at death: ID=${cashId}, Amount=${cashCollected}, Position=${JSON.stringify(player.position)}`);
       
       // Broadcast cash spawn to all players in the room
-      // Use direct broadcast to each player instead of broadcastExcept with empty string
       for (const [pid, info] of Object.entries(this.players)) {
         // Only send to players in the same room and event
         if (info.roomId === player.roomId && info.eventId === player.eventId) {
@@ -571,6 +572,11 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     
     // Reset the player's cash to 0 after death
     player.cashCollected = 0;
+
+    // Update cashWon in database to 0 since player died
+    if (player.eventId) {
+      this.updatePlayerCashWon(playerId, player.eventId, 0);
+    }
 
     // Broadcast "death" to others in the room AND event
     this.broadcastExcept({
@@ -593,11 +599,13 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     // Player remains alive but game is complete
     const playerRank = 1; // They made it to the end, so they're #1
-    this.logger.log(`Player ${playerId} completed the game with rank ${playerRank}, cash collected: ${player.cashCollected || 0}`);
+    const finalCash = player.cashCollected || 0;
+    this.logger.log(`Player ${playerId} completed the game with rank ${playerRank}, cash collected: ${finalCash}`);
 
-    // Update database with winner status
+    // Update database with winner status and cash won
     if (player.eventId) {
       this.updatePlayerWinInDatabase(playerId, player.eventId, playerRank);
+      this.updatePlayerCashWon(playerId, player.eventId, finalCash);
     }
 
     // Send game end stats directly to the player
@@ -606,7 +614,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         type: 'game_end_stats',
         playerId: playerId,
         rank: playerRank,
-        cashCollected: player.cashCollected || 0, 
+        cashCollected: finalCash, 
       },
       player.address, 
       player.port
@@ -625,18 +633,18 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Example function to mark a player as 'eliminated' or 'winner' in the database.
    */
   private async updatePlayerDeathInDatabase(playerId: string, eventId: string, position: number) {
-    // try {
-    //   await this.playerModel.findOneAndUpdate(
-    //     { userId: playerId, eventId },
-    //     {
-    //       status: position === 1 ? 'winner' : 'eliminated',
-    //       isAlive: false,
-    //       position: position,
-    //     },
-    //   );
-    // } catch (error) {
-    //   this.logger.error(`Failed to update player ${playerId} death in database:`, error);
-    // }
+    try {
+      await this.playerModel.findOneAndUpdate(
+        { userId: playerId, eventId },
+        {
+          status: position === 1 ? 'winner' : 'eliminated',
+          isAlive: false,
+          position: position,
+        },
+      );
+    } catch (error) {
+      this.logger.error(`Failed to update player ${playerId} death in database:`, error);
+    }
   }
 
   /**
@@ -645,18 +653,18 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Marks a player as a 'winner' in the database and preserves their position.
    */
   private async updatePlayerWinInDatabase(playerId: string, eventId: string, position: number) {
-    // try {
-    //   await this.playerModel.findOneAndUpdate(
-    //     { userId: playerId, eventId },
-    //     {
-    //       status: 'winner',
-    //       isAlive: true,
-    //       position: position,
-    //     },
-    //   );
-    // } catch (error) {
-    //   this.logger.error(`Failed to update player ${playerId} win in database:`, error);
-    // }
+    try {
+      await this.playerModel.findOneAndUpdate(
+        { userId: playerId, eventId },
+        {
+          status: 'winner',
+          isAlive: true,
+          position: position,
+        },
+      );
+    } catch (error) {
+      this.logger.error(`Failed to update player ${playerId} win in database:`, error);
+    }
   }
 
   /**
@@ -675,6 +683,45 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     
     // Log the clean disconnect
     this.logger.log(`Player ${playerId} disconnected cleanly`);
+
+    // Store the cash amount before cleanup
+    const cashCollected = player.cashCollected || 0;
+
+    // Only spawn cash if the player had collected some
+    if (cashCollected > 0) {
+      // Generate a unique cash ID using player ID and timestamp
+      const cashId = `${playerId}_disconnect_${Date.now()}`;
+      
+      // Store in cash objects map
+      this.cashObjects[cashId] = { 
+        position: player.position, 
+        roomId: player.roomId, 
+        eventId: player.eventId 
+      };
+      
+      this.logger.log(`Spawning cash at disconnect: ID=${cashId}, Amount=${cashCollected}, Position=${JSON.stringify(player.position)}`);
+      
+      // Broadcast cash spawn to all players in the room
+      for (const [pid, info] of Object.entries(this.players)) {
+        // Only send to players in the same room and event
+        if (info.roomId === player.roomId && info.eventId === player.eventId) {
+          this.logger.log(`Sending cash_spawn to player ${pid}`);
+          this.sendMessage({
+            type: 'cash_spawn',
+            cashId: cashId,
+            position: player.position,
+            cashAmount: cashCollected,
+            playerId: playerId,
+            eventId: player.eventId,
+          }, info.address, info.port);
+        }
+      }
+    }
+
+    // Update cashWon in database to 0 since player disconnected
+    if (player.eventId) {
+      this.updatePlayerCashWon(playerId, player.eventId, 0);
+    }
 
     // Broadcast disconnect to other players in the room AND event
     this.broadcastExcept({
@@ -850,5 +897,23 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       roomId,
       finalEventId,
     );
+  }
+
+  /**
+   * updatePlayerCashWon
+   * -------------------
+   * Updates the player's cashWon amount in the database
+   */
+  private async updatePlayerCashWon(playerId: string, eventId: string, amount: number) {
+    try {
+      await this.playerModel.findOneAndUpdate(
+        { userId: playerId, eventId },
+        {
+          cashWon: amount,
+        },
+      );
+    } catch (error) {
+      this.logger.error(`Failed to update player ${playerId} cashWon in database:`, error);
+    }
   }
 }

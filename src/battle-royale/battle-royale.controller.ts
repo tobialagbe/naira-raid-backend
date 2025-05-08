@@ -36,9 +36,10 @@ export class BattleRoyaleController {
   }
 
   @Get('events/upcoming')
-  @ApiOperation({ summary: 'Get the latest upcoming Battle Royale event' })
-  getLatestUpcomingEvent() {
-    return this.battleRoyaleService.getLatestUpcomingEvent();
+  @ApiOperation({ summary: 'Get the latest 5 upcoming Battle Royale events' })
+  @ApiQuery({ name: 'userId', required: false, description: 'User ID to check registration status' })
+  getLatestUpcomingEvent(@Query('userId') userId?: string) {
+    return this.battleRoyaleService.getLatestUpcomingEvent(userId);
   }
 
   @Get('events/:id')
