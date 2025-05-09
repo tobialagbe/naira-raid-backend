@@ -8,6 +8,7 @@ import { CreateEventDto } from '../dto/create-event.dto';
 import { RegisterPlayerDto } from '../dto/register-player.dto';
 import { UpdatePlayerDto } from '../dto/update-player.dto';
 import { UserService } from '../../user/user.service';
+import { BattleStatsDto } from '../dto/battle-stats.dto';
 
 @Injectable()
 export class BattleRoyaleService {
@@ -295,5 +296,85 @@ export class BattleRoyaleService {
     });
 
     return { ...upcomingEvent, registeredParticipants };
+  }
+
+  /**
+   * Get player battle statistics (total battles, wins, best rank)
+   */
+  async getPlayerBattleStats(userId: string): Promise<BattleStatsDto> {
+    // Convert userId to ObjectId for MongoDB queries
+    const userIdObj = new Types.ObjectId(userId.toString());
+    
+    // Get all player records for this user
+    const playerRecords = await this.playerModel.find({ userId: userIdObj }).lean().exec();
+    
+    // Calculate stats
+    const totalBattles = playerRecords.length;
+    
+    // Count wins (position === 1)
+    const wins = playerRecords.filter(record => record.position === 1).length;
+    
+    // Find best rank (lowest position number greater than 0)
+    // Position 0 means still active/registered but hasn't competed yet
+    const positions = playerRecords
+      .map(record => record.position)
+      .filter(position => position > 0);
+    
+    const bestRank = positions.length > 0 ? Math.min(...positions) : 0;
+    
+    // Get unwithdrawn cash
+    const unwithdrawnCash = await this.getUnwithdrawnCash(userId);
+    
+    return {
+      totalBattles,
+      wins,
+      bestRank: bestRank || 0,
+      unwithdrawnCash
+    };
+  }
+
+  /**
+   * Get the amount of unwithdrawn cash for a user
+   */
+  async getUnwithdrawnCash(userId: string): Promise<number> {
+    // Convert userId to ObjectId for MongoDB queries
+    const userIdObj = new Types.ObjectId(userId.toString());
+    
+    // Get all player records for this user where cash is not withdrawn
+    const playerRecords = await this.playerModel.find({ 
+      userId: userIdObj,
+      cashWithdrawn: false,
+      cashWon: { $gt: 0 }
+    }).lean().exec();
+    
+    // Calculate total unwithdrawn cash
+    const totalUnwithdrawnCash = playerRecords.reduce((total, record) => total + record.cashWon, 0);
+    
+    return totalUnwithdrawnCash;
+  }
+
+  /**
+   * Withdraw all unwithdrawn cash for a user
+   */
+  async withdrawCash(userId: string): Promise<{ amountWithdrawn: number }> {
+    // Convert userId to ObjectId for MongoDB queries
+    const userIdObj = new Types.ObjectId(userId.toString());
+    
+    // Find all records with unwithdrawn cash
+    const result = await this.playerModel.updateMany(
+      { 
+        userId: userIdObj,
+        cashWithdrawn: false,
+        cashWon: { $gt: 0 }
+      },
+      { 
+        $set: { cashWithdrawn: true } 
+      }
+    );
+    
+    // For audit purposes, find the total amount that was withdrawn
+    const unwithdrawnCash = await this.getUnwithdrawnCash(userId);
+    
+    return { amountWithdrawn: unwithdrawnCash };
   }
 } 

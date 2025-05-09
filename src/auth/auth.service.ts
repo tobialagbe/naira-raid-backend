@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../user/user.service';
 import { EmailService } from '../email/email.service';
+import { BattleRoyaleService } from '../battle-royale/services/battle-royale.service';
 import { CreateUserDto } from '../user/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
 import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
@@ -21,6 +22,7 @@ export class AuthService {
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
+    private readonly battleRoyaleService: BattleRoyaleService,
   ) {}
 
   async validateUser({ email, password }: { email: string; password: string }) {
@@ -52,7 +54,14 @@ export class AuthService {
     await this.emailService.sendVerificationEmail(user, verificationToken);
 
     const { password: _, ...result } = user.toObject();
-    return result;
+    
+    // Add battle stats (will be empty for a new user)
+    const battleStats = await this.battleRoyaleService.getPlayerBattleStats(user._id.toString());
+    
+    return {
+      ...result,
+      battleStats
+    };
   }
 
   async login(loginDto: LoginDto) {
@@ -85,11 +94,17 @@ export class AuthService {
       userId: user._id.toString(),
       expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     });
+    
+    // Get battle statistics
+    const battleStats = await this.battleRoyaleService.getPlayerBattleStats(user._id.toString());
 
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
-      user,
+      user: {
+        ...user,
+        battleStats
+      }
     };
   }
 

@@ -99,4 +99,19 @@ export class BattleRoyaleController {
   getClosestRegisteredUpcomingEvent(@Request() req) {
     return this.battleRoyaleService.getClosestUpcomingEventForUser(req.user.userId);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('withdraw-cash')
+  @ApiOperation({ summary: 'Withdraw all unwithdrawn cash from battle royale winnings' })
+  withdrawCash(@Request() req) {
+    return this.battleRoyaleService.withdrawCash(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('unwithdrawn-cash')
+  @ApiOperation({ summary: 'Get total unwithdrawn cash amount from battle royale winnings' })
+  async getUnwithdrawnCash(@Request() req) {
+    const unwithdrawnCash = await this.battleRoyaleService.getUnwithdrawnCash(req.user.userId);
+    return { unwithdrawnCash };
+  }
 } 

@@ -36,6 +36,9 @@ export class User {
 
   @Prop({ default: 0 })
   points: number;
+
+  @Prop({ default: 0 })
+  coins: number;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User); 

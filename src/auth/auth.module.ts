@@ -8,12 +8,14 @@ import { UserModule } from '../user/user.module';
 import { EmailModule } from '../email/email.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
+import { BattleRoyaleModule } from '../battle-royale/battle-royale.module';
 
 @Module({
   imports: [
     UserModule,
     EmailModule.register(),
     PassportModule,
+    BattleRoyaleModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
