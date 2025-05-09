@@ -1,5 +1,5 @@
 /* eslint-disable max-len */
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { BattleRoyaleEvent, BattleRoyaleEventDocument } from '../schemas/battle-royale-event.schema';
@@ -17,7 +17,7 @@ export class BattleRoyaleService {
     private readonly eventModel: Model<BattleRoyaleEventDocument>,
     @InjectModel(BattleRoyalePlayer.name)
     private readonly playerModel: Model<BattleRoyalePlayerDocument>,
-    private readonly userService: UserService,
+    @Inject(forwardRef(() => UserService)) private readonly userService: UserService,
   ) {}
 
   /**
