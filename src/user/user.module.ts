@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { UserService } from './user.service';
@@ -10,7 +10,7 @@ import { BattleRoyaleModule } from '../battle-royale/battle-royale.module';
   imports: [
     ConfigModule,
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
-    BattleRoyaleModule,
+    forwardRef(() => BattleRoyaleModule),
   ],
   controllers: [UserController],
   providers: [UserService],

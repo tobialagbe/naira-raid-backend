@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { BattleRoyaleController } from './battle-royale.controller';
@@ -12,7 +12,7 @@ import { WebSocketServerService } from './services/websocket-server.service';
 @Module({
   imports: [
     ConfigModule,
-    UserModule,
+    forwardRef(() => UserModule),
     MongooseModule.forFeature([
       { name: BattleRoyaleEvent.name, schema: BattleRoyaleEventSchema },
       { name: BattleRoyalePlayer.name, schema: BattleRoyalePlayerSchema },
