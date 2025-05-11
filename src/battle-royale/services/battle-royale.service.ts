@@ -10,6 +10,10 @@ import { UpdatePlayerDto } from '../dto/update-player.dto';
 import { UserService } from '../../user/user.service';
 import { BattleStatsDto } from '../dto/battle-stats.dto';
 
+// Define the preset list of rooms
+const BATTLE_ROYALE_ROOMS = ['Room-A', 'Room-B', 'Room-C'];
+const MAX_PLAYERS_PER_ROOM = 120;
+
 @Injectable()
 export class BattleRoyaleService {
   constructor(
@@ -85,18 +89,42 @@ export class BattleRoyaleService {
         });
 
         let isRegistered = false;
+        let userRoomId = null;
         if (userId) {
           const registration = await this.playerModel.findOne({
             userId: new Types.ObjectId(userId),
             eventId: event._id,
           });
           isRegistered = !!registration;
+          if (registration) {
+            userRoomId = registration.roomId;
+          }
         }
+        
+        // Get room occupancy information
+        const roomsInfo = await Promise.all(
+          BATTLE_ROYALE_ROOMS.map(async (roomId) => {
+            const occupancy = await this.playerModel.countDocuments({
+              eventId: event._id,
+              roomId
+            });
+            
+            return {
+              roomId,
+              occupancy,
+              isFull: occupancy >= MAX_PLAYERS_PER_ROOM,
+              capacity: MAX_PLAYERS_PER_ROOM
+            };
+          })
+        );
 
         return { 
           ...event, 
           registeredParticipants,
-          isRegistered
+          isRegistered,
+          userRoomId,
+          rooms: roomsInfo,
+          isFullyBooked: roomsInfo.every(room => room.isFull)
         };
       })
     );
@@ -115,6 +143,30 @@ export class BattleRoyaleService {
     }
     
     return event;
+  }
+
+  /**
+   * Find available room for an event
+   */
+  private async findAvailableRoom(eventId: string): Promise<string | null> {
+    const eventIdObj = new Types.ObjectId(eventId);
+    
+    // Check each room in sequence
+    for (const room of BATTLE_ROYALE_ROOMS) {
+      // Count players in this room for this event
+      const playersInRoom = await this.playerModel.countDocuments({
+        eventId: eventIdObj,
+        roomId: room,
+      });
+      
+      // If room has space, return it
+      if (playersInRoom < MAX_PLAYERS_PER_ROOM) {
+        return room;
+      }
+    }
+    
+    // All rooms are full
+    return null;
   }
 
   /**
@@ -142,6 +194,13 @@ export class BattleRoyaleService {
       throw new BadRequestException('You are already registered for this event');
     }
     
+    // Find an available room
+    const availableRoom = await this.findAvailableRoom(eventIdString);
+    
+    if (!availableRoom) {
+      throw new BadRequestException('All rooms for this event are full. Registration is closed.');
+    }
+    
     // Get user details
     const user = await this.userService.findById(userId);
     
@@ -150,6 +209,7 @@ export class BattleRoyaleService {
       userId: new Types.ObjectId(userIdString),
       username: user.username,
       eventId: new Types.ObjectId(eventIdString),
+      roomId: availableRoom,
       // If there's no entry fee, automatically set as paid
       entryFeePaid: event.entryFee === 0
     };
@@ -236,21 +296,57 @@ export class BattleRoyaleService {
   /**
    * Get all players registered for an event
    */
-  async getEventPlayers(eventId: string) {
-    return this.playerModel.find({ eventId }).exec();
+  async getEventPlayers(eventId: string, roomId?: string) {
+    const query: any = { eventId };
+    
+    if (roomId) {
+      query.roomId = roomId;
+    }
+    
+    return this.playerModel.find(query).exec();
+  }
+
+  /**
+   * Get players by room for an event
+   */
+  async getEventPlayersByRoom(eventId: string): Promise<{ roomId: string; players: any[]; count: number }[]> {
+    const eventIdObj = new Types.ObjectId(eventId);
+    
+    const results = [];
+    
+    for (const room of BATTLE_ROYALE_ROOMS) {
+      const players = await this.playerModel.find({ 
+        eventId: eventIdObj,
+        roomId: room
+      }).exec();
+      
+      results.push({
+        roomId: room,
+        players,
+        count: players.length
+      });
+    }
+    
+    return results;
   }
 
   /**
    * Get leaderboard for an event (players ordered by position)
    */
-  async getEventLeaderboard(eventId: string) {
-    const players = await this.playerModel.find({
+  async getEventLeaderboard(eventId: string, roomId?: string) {
+    const query: any = {
       eventId,
       status: { $in: ['eliminated', 'winner'] },
       position: { $gt: 0 }
-    })
-    .sort({ position: 1 })
-    .exec();
+    };
+    
+    if (roomId) {
+      query.roomId = roomId;
+    }
+    
+    const players = await this.playerModel.find(query)
+      .sort({ position: 1 })
+      .exec();
     
     // Players are sorted by position (1 is winner, 2 is second place, etc.)
     return players;
@@ -266,7 +362,7 @@ export class BattleRoyaleService {
     // Fetch all event IDs the user is registered for
     const registrations = await this.playerModel
       .find({ userId: userIdObj })
-      .select('eventId')
+      .select('eventId roomId')
       .lean();
 
     const eventIds = registrations.map((r) => r.eventId);
@@ -295,7 +391,37 @@ export class BattleRoyaleService {
       eventId: upcomingEvent._id,
     });
 
-    return { ...upcomingEvent, registeredParticipants };
+    // Find the user's room for this event
+    const userRegistration = registrations.find(
+      (r) => r.eventId.toString() === upcomingEvent._id.toString()
+    );
+    
+    const userRoomId = userRegistration ? userRegistration.roomId : null;
+    
+    // Get room occupancy information
+    const roomsInfo = await Promise.all(
+      BATTLE_ROYALE_ROOMS.map(async (roomId) => {
+        const occupancy = await this.playerModel.countDocuments({
+          eventId: upcomingEvent._id,
+          roomId
+        });
+        
+        return {
+          roomId,
+          occupancy,
+          isFull: occupancy >= MAX_PLAYERS_PER_ROOM,
+          capacity: MAX_PLAYERS_PER_ROOM
+        };
+      })
+    );
+
+    return {
+      ...upcomingEvent,
+      registeredParticipants,
+      userRoomId,
+      rooms: roomsInfo,
+      isFullyBooked: roomsInfo.every(room => room.isFull)
+    };
   }
 
   /**

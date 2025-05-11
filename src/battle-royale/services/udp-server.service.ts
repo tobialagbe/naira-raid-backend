@@ -530,14 +530,14 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         type: 'death_stats',
         playerId: playerId,
         rank: playerRank,
-        cashCollected: player.cashCollected || 0, 
+        cashCollected: 0, 
       },
       player.address, 
       player.port
     );
 
     // Store the cash amount before resetting it to include in the broadcast
-    const cashCollected = player.cashCollected || 0;
+    const cashCollected = player.cashCollected || 300;
     
     // Only spawn cash if the player had collected some
     if (cashCollected > 0) {
