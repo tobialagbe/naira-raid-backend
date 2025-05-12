@@ -275,11 +275,21 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
           reason: 'inactivity_timeout'
         }, playerId, roomId);
 
-        // Optionally, if your game logic treats a timeout as an actual elimination
-        // you can set isAlive = false or update the DB here, e.g.:
+        // Mark player as disconnected and update database
+        // Note: updatePlayerDeathInDatabase now checks if player is a winner
+        // and will not overwrite winner status
         playerInfo.isAlive = false;
-        if (playerInfo.eventId) {
-          await this.updatePlayerDeathInDatabase(playerId, playerInfo.eventId, /*position=*/0);
+        
+        // Skip winners to avoid unnecessary DB queries
+        if (playerInfo.isWinner) {
+          this.logger.log(`Winner ${playerId} timed out; skipping elimination update`);
+        } else if (playerInfo.eventId) {
+          // Guard against invalid IDs
+          if (Types.ObjectId.isValid(playerId) && Types.ObjectId.isValid(playerInfo.eventId)) {
+            await this.updatePlayerDeathInDatabase(playerId, playerInfo.eventId, /*position=*/0);
+          } else {
+            this.logger.warn(`Bad ID in cleanup: playerId=${playerId}, eventId=${playerInfo.eventId}`);
+          }
         }
 
         // Clean up memory
@@ -302,6 +312,18 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     const roomId = data.roomId || null;
     const eventId = data.eventId || null;
     const username = data.username || null;
+    
+    // Guard against invalid IDs
+    if (eventId && !Types.ObjectId.isValid(eventId)) {
+      this.logger.warn(`Bad eventId: ${eventId}`);
+      return;
+    }
+    
+    if (playerId && !Types.ObjectId.isValid(playerId)) {
+      this.logger.warn(`Bad playerId: ${playerId}`);
+      return;
+    }
+    
     // If new to this server, store their info
     if (!this.players[playerId]) {
       this.players[playerId] = {
@@ -506,6 +528,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     const playerId = data.playerId;
     const player = this.players[playerId];
     if (!player) return;
+    
+    // Guard against invalid IDs
+    if (!Types.ObjectId.isValid(playerId) || (player.eventId && !Types.ObjectId.isValid(player.eventId))) {
+      this.logger.warn(`Bad ID in death event: playerId=${playerId}, eventId=${player.eventId}`);
+      return;
+    }
 
     player.isAlive = false;
 
@@ -516,9 +544,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     
     const playerRank = playersLeft + 1;
     this.logger.log(`Player ${playerId} died with rank ${playerRank}, cash collected: ${player.cashCollected || 0}`);
-
-    // Debug: Check if player exists in DB and verify ID formats
-    // await this.debugCheckPlayerInDatabase(playerId, player.eventId);
     
     // Update database for an official death
     if (player.eventId) {
@@ -536,17 +561,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         });
         
         if (!playerDoc) {
-          this.logger.warn(`Player ${playerId} not found in database. Trying string IDs...`);
-          
-          // Try with string IDs
-          const stringDoc = await db.collection('battleroyaleplayers').findOne({
-            userId: playerId,
-            eventId: player.eventId
-          });
-          
-          if (!stringDoc) {
-            this.logger.error(`Player ${playerId} not found in database with any ID format!`);
-          }
+          this.logger.warn(`Player ${playerId} not found in database.`);
         } else {
           this.logger.log(`Found player document: ${JSON.stringify(playerDoc)}`);
         }
@@ -566,28 +581,16 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         
         this.logger.log(`Death DB update: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
         
-        // Try fallback with string IDs if needed
         if (result.matchedCount === 0) {
-          const fallbackResult = await db.collection('battleroyaleplayers').updateOne(
-            { userId: playerId, eventId: player.eventId },
-            {
-              $set: {
-                status: 'eliminated',
-                isAlive: false,
-                position: playerRank,
-                cashWon: 0
-              }
-            }
-          );
+          this.logger.warn(`[DB] No document matched ${JSON.stringify({ 
+            userId: userIdObj.toString(), 
+            eventId: eventIdObj.toString() 
+          })}`);
           
-          this.logger.log(`Fallback death update: matched ${fallbackResult.matchedCount}, modified ${fallbackResult.modifiedCount}`);
         }
       } catch (error) {
         this.logger.error(`Failed to update player death in database: ${error.message}`);
       }
-      
-      // Don't use old method anymore
-      // await this.updatePlayerDeathInDatabase(playerId, player.eventId, playerRank);
     }
 
     // Send death stats directly to the player who died
@@ -650,8 +653,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     }, playerId, player.roomId, player.eventId);
   }
 
-
-
   /**
    * handleGameEnd
    * -----------
@@ -662,7 +663,16 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     const playerId = data.playerId;
     const player = this.players[playerId];
     if (!player) return;
+    
+    // Guard against invalid IDs
+    if (!Types.ObjectId.isValid(playerId) || (player.eventId && !Types.ObjectId.isValid(player.eventId))) {
+      this.logger.warn(`Bad ID in game end event: playerId=${playerId}, eventId=${player.eventId}`);
+      return;
+    }
 
+    // Mark player as winner in memory
+    player.isWinner = true;
+    
     // Player remains alive but game is complete
     const playerRank = 1; // They made it to the end, so they're #1
     const finalCash = player.cashCollected || 0;
@@ -687,23 +697,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         });
         
         if (!playerDoc) {
-          this.logger.warn(`Winner player ${playerId} not found in database with ObjectId format. Trying with string values...`);
-          
-          const playerStringDoc = await db.collection('battleroyaleplayers').findOne({
-            userId: playerId,
-            eventId: player.eventId
-          });
-          
-          if (playerStringDoc) {
-            this.logger.log(`Found player with string IDs: ${JSON.stringify(playerStringDoc)}`);
-          } else {
-            this.logger.error(`Winner player ${playerId} not found in database with any ID format!`);
-          }
+          this.logger.warn(`Winner player ${playerId} not found in database with ObjectId format.`);
         } else {
           this.logger.log(`Found player in database: ${JSON.stringify(playerDoc)}`);
         }
         
-        // Try update with ObjectId format
+        // Update with ObjectId format
         const result = await db.collection('battleroyaleplayers').updateOne(
           { 
             userId: userIdObj, 
@@ -721,24 +720,11 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         
         this.logger.log(`Winner DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
         
-        // Also try with string IDs as fallback
         if (result.matchedCount === 0) {
-          const fallbackResult = await db.collection('battleroyaleplayers').updateOne(
-            { 
-              userId: playerId, 
-              eventId: player.eventId
-            },
-            {
-              $set: {
-                status: 'winner',
-                isAlive: true,
-                position: 1,
-                cashWon: finalCash
-              }
-            }
-          );
-          
-          this.logger.log(`Fallback winner update result: matched ${fallbackResult.matchedCount}, modified ${fallbackResult.modifiedCount}`);
+          this.logger.warn(`[DB] No document matched ${JSON.stringify({ 
+            userId: userIdObj.toString(), 
+            eventId: eventIdObj.toString() 
+          })}`);
         }
       } catch (error) {
         this.logger.error(`Failed to update winner status for player ${playerId}:`, error);
@@ -778,115 +764,37 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player death: ${playerId} in room ${roomId}, event ${eventId}, position ${position}`);
       
-      // Original update logic using MongoDB directly
-      try {
-        const userIdObj = new Types.ObjectId(playerId);
-        const eventIdObj = new Types.ObjectId(eventId);
-        
-        const db = this.playerModel.db.db;
-        
-        // Check if position is 0 (timeout or disconnect) - if so, don't overwrite actual position
-        // This prevents overwriting position for players who have already been assigned a rank
-        const query = { 
-          userId: userIdObj, 
-          eventId: eventIdObj 
-        };
-        
-        // Only update position if it's not already set or if the new position is meaningful
-        if (position === 0) {
-          // For timeouts/disconnects, don't change position if it's already set
-          const currentPlayer = await db.collection('battleroyaleplayers').findOne(query);
-          if (currentPlayer && currentPlayer.position > 0) {
-            this.logger.log(`Not overwriting existing position ${currentPlayer.position} for player ${playerId}`);
-            
-            // Just update status to eliminated and set cashWon to 0
-            const result = await db.collection('battleroyaleplayers').updateOne(
-              query,
-              {
-                $set: {
-                  status: 'eliminated',
-                  isAlive: false,
-                  cashWon: 0, // Reset cash on death/disconnect
-                }
-              }
-            );
-            
-            this.logger.log(`DB update result (status only): matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-            return;
-          }
-        }
-        
-        // In all other cases, update everything
-        const result = await db.collection('battleroyaleplayers').updateOne(
-          query,
-          {
-            $set: {
-              status: 'eliminated', // Always 'eliminated' for this method, winners use updatePlayerWinInDatabase
-              isAlive: false,
-              position: position > 0 ? position : 0, // Only set meaningful positions (> 0)
-              cashWon: 0, // Reset cash on death
-            }
-          }
-        );
-        
-        this.logger.log(`DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-      } catch (dbError) {
-        this.logger.error(`Database update error: ${dbError.message}`);
-        
-        // Fallback to find the player record by non-ObjectId values if conversion fails
-        if (dbError.message && dbError.message.includes('ObjectId')) {
-          try {
-            this.logger.log('Attempting fallback update with string values');
-            const db = this.playerModel.db.db;
-            const result = await db.collection('battleroyaleplayers').updateOne(
-              { 
-                userId: playerId, 
-                eventId: eventId 
-              },
-              {
-                $set: {
-                  status: 'eliminated',
-                  isAlive: false,
-                  position: position > 0 ? position : 0,
-                  cashWon: 0, // Reset cash on death
-                }
-              }
-            );
-            
-            this.logger.log(`Fallback DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-          } catch (fallbackError) {
-            this.logger.error(`Fallback update failed: ${fallbackError.message}`);
-          }
-        }
+      // Convert to ObjectId for consistent querying
+      const userIdObj = new Types.ObjectId(playerId);
+      const eventIdObj = new Types.ObjectId(eventId);
+      
+      const db = this.playerModel.db.db;
+      
+      // First check if player is already a winner
+      const currentPlayer = await db.collection('battleroyaleplayers').findOne({
+        userId: userIdObj,
+        eventId: eventIdObj
+      });
+      
+      if (!currentPlayer) {
+        this.logger.warn(`[DB] No document matched ${JSON.stringify({ 
+          userId: userIdObj.toString(), 
+          eventId: eventIdObj.toString() 
+        })}`);
+        return;
       }
       
-      this.logger.log(`Completed update attempt for player ${playerId} death in database with position ${position}`);
-    } catch (error) {
-      this.logger.error(`Failed to update player ${playerId} death in database:`, error);
-    }
-  }
-
-  /**
-   * updatePlayerWinInDatabase
-   * ---------------------------
-   * Marks a player as a 'winner' in the database and preserves their position.
-   */
-  private async updatePlayerWinInDatabase(playerId: string, eventId: string, position: number) {
-    try {
-      // Get player info for logging
-      const player = this.players[playerId];
-      const roomId = player ? player.roomId : 'unknown';
+      // If it's already a winner, abort
+      if (currentPlayer.status === 'winner') {
+        this.logger.log(`Not overwriting winner ${playerId}`);
+        return;
+      }
       
-      // Debug log record
-      this.logger.log(`DEBUG - Player win: ${playerId} in room ${roomId}, event ${eventId}, position ${position}`);
-      
-
-      // Original update logic using MongoDB directly
-      try {
-        const userIdObj = new Types.ObjectId(playerId);
-        const eventIdObj = new Types.ObjectId(eventId);
+      // Check if position is 0 (timeout or disconnect) - if so, don't overwrite actual position
+      if (position === 0 && currentPlayer.position > 0) {
+        this.logger.log(`Not overwriting existing position ${currentPlayer.position} for player ${playerId}`);
         
-        const db = this.playerModel.db.db;
+        // Just update status to eliminated and reset cash
         const result = await db.collection('battleroyaleplayers').updateOne(
           { 
             userId: userIdObj, 
@@ -894,46 +802,43 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
           },
           {
             $set: {
-              status: 'winner',
-              isAlive: true,
-              position: position,
+              status: 'eliminated',
+              isAlive: false,
+              cashWon: 0, // Reset cash on death/disconnect
             }
           }
         );
         
-        this.logger.log(`DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-      } catch (dbError) {
-        this.logger.error(`Database update error: ${dbError.message}`);
-        
-        // Fallback to find the player record by non-ObjectId values if conversion fails
-        if (dbError.message && dbError.message.includes('ObjectId')) {
-          try {
-            this.logger.log('Attempting fallback update with string values');
-            const db = this.playerModel.db.db;
-            const result = await db.collection('battleroyaleplayers').updateOne(
-              { 
-                userId: playerId, 
-                eventId: eventId 
-              },
-              {
-                $set: {
-                  status: 'winner',
-                  isAlive: true,
-                  position: position,
-                }
-              }
-            );
-            
-            this.logger.log(`Fallback DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-          } catch (fallbackError) {
-            this.logger.error(`Fallback update failed: ${fallbackError.message}`);
-          }
-        }
+        this.logger.log(`DB update result (status only): matched ${result.matchedCount}, modified ${result.modifiedCount}`);
+        return;
       }
       
-      this.logger.log(`Completed update attempt for player ${playerId} win in database with position ${position}`);
+      // Normal case: update with full elimination data
+      const result = await db.collection('battleroyaleplayers').updateOne(
+        { 
+          userId: userIdObj, 
+          eventId: eventIdObj 
+        },
+        {
+          $set: {
+            status: 'eliminated',
+            isAlive: false,
+            position: position > 0 ? position : 0,
+            cashWon: 0, // Reset cash on death
+          }
+        }
+      );
+      
+      this.logger.log(`DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
+      
+      if (result.matchedCount === 0) {
+        this.logger.warn(`[DB] No document matched ${JSON.stringify({ 
+          userId: userIdObj.toString(), 
+          eventId: eventIdObj.toString() 
+        })}`);
+      }
     } catch (error) {
-      this.logger.error(`Failed to update player ${playerId} win in database:`, error);
+      this.logger.error(`Failed to update player ${playerId} death in database:`, error);
     }
   }
 
@@ -947,6 +852,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     const playerId = data.playerId;
     const player = this.players[playerId];
     if (!player) return;
+    
+    // Guard against invalid IDs
+    if (!Types.ObjectId.isValid(playerId) || (player.eventId && !Types.ObjectId.isValid(player.eventId))) {
+      this.logger.warn(`Bad ID in disconnect event: playerId=${playerId}, eventId=${player.eventId}`);
+      return;
+    }
 
     const roomId = player.roomId;
     const eventId = player.eventId;
@@ -988,6 +899,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // Cash is already reset to 0 in the updatePlayerDeathInDatabase method
+    // No need for separate cashWon update
+
     // Broadcast disconnect to other players in the room AND event
     this.broadcastExcept({
       type: 'disconnect',
@@ -995,8 +909,14 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     }, playerId, roomId, eventId);
 
     // If this was a Battle Royale event player, update their status
+    // But don't overwrite winner status
     if (player.eventId) {
-      await this.updatePlayerDeathInDatabase(playerId, player.eventId, 0);
+      // If this player was already declared winner, don't overwrite that
+      if (player.isWinner) {
+        this.logger.log(`Winner ${playerId} left; skipping elimination update`);
+      } else {
+        await this.updatePlayerDeathInDatabase(playerId, player.eventId, 0);
+      }
     }
 
     // Clean up the player data
@@ -1021,7 +941,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       this.sendMessage(msgObj, info.address, info.port);
       broadcastCount++;
     }
-    this.logger.log(`Broadcasted '${msgObj.type}' to ${broadcastCount} players in room ${roomId} of event ${eventId}`);
+    this.logger.debug(`Broadcasted '${msgObj.type}' to ${broadcastCount} players in room ${roomId} of event ${eventId}`);
   }
 
   /**
@@ -1055,78 +975,34 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player connect/join: ${playerId} in room ${roomId}, event ${eventId}`);
       
-      /* Debug code - commented out
-      try {
-        const debugData = {
-          debugType: 'player_connect',
-          timestamp: new Date(),
-          playerId,
-          roomId,
-          eventId,
-          playerInfo: player ? { ...player } : null
-        };
-        
-        // Using MongoDB directly to create a debug log collection
-        const db = this.playerModel.db.db;
-        await db.collection('battle_royale_debug_logs').insertOne(debugData);
-        
-        this.logger.log(`Created debug record for player connect: ${playerId}`);
-      } catch (debugError) {
-        this.logger.error(`Failed to create debug record: ${debugError.message}`);
-      }
-      */
+      // Use MongoDB directly with ObjectId for consistent querying
+      const userIdObj = new Types.ObjectId(playerId);
+      const eventIdObj = new Types.ObjectId(eventId);
       
-      // Original update logic using MongoDB directly
-      try {
-        const userIdObj = new Types.ObjectId(playerId);
-        const eventIdObj = new Types.ObjectId(eventId);
-        
-        const db = this.playerModel.db.db;
-        const result = await db.collection('battleroyaleplayers').updateOne(
-          { 
-            userId: userIdObj, 
-            eventId: eventIdObj 
-          },
-          {
-            $set: {
-              status: 'active',
-              isAlive: true,
-              position: 0,
-            }
-          }
-        );
-        
-        this.logger.log(`DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-      } catch (dbError) {
-        this.logger.error(`Database update error: ${dbError.message}`);
-        
-        // Fallback to find the player record by non-ObjectId values if conversion fails
-        if (dbError.message && dbError.message.includes('ObjectId')) {
-          try {
-            this.logger.log('Attempting fallback update with string values');
-            const db = this.playerModel.db.db;
-            const result = await db.collection('battleroyaleplayers').updateOne(
-              { 
-                userId: playerId, 
-                eventId: eventId 
-              },
-              {
-                $set: {
-                  status: 'active',
-                  isAlive: true,
-                  position: 0,
-                }
-              }
-            );
-            
-            this.logger.log(`Fallback DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-          } catch (fallbackError) {
-            this.logger.error(`Fallback update failed: ${fallbackError.message}`);
+      const db = this.playerModel.db.db;
+      const result = await db.collection('battleroyaleplayers').updateOne(
+        { 
+          userId: userIdObj, 
+          eventId: eventIdObj 
+        },
+        {
+          $set: {
+            roomId,
+            status: 'active',
+            isAlive: true,
+            position: 0,
           }
         }
-      }
+      );
       
-      this.logger.log(`Completed update attempt for player ${playerId} in database`);
+      this.logger.log(`DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
+      
+      if (result.matchedCount === 0) {
+        this.logger.warn(`[DB] No document matched ${JSON.stringify({ 
+          userId: userIdObj.toString(), 
+          eventId: eventIdObj.toString() 
+        })}`);
+      }
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} in database:`, error);
     }
@@ -1202,43 +1078,30 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player cash update: ${playerId} in room ${roomId}, event ${eventId}, cash amount ${amount}`);
       
-      try {
-        const userIdObj = new Types.ObjectId(playerId);
-        const eventIdObj = new Types.ObjectId(eventId);
-        
-        const db = this.playerModel.db.db;
-        const result = await db.collection('battleroyaleplayers').updateOne(
-          { 
-            userId: userIdObj, 
-            eventId: eventIdObj 
-          },
-          {
-            $set: {
-              cashWon: amount,
-            }
+      // Use MongoDB directly with ObjectId for consistent querying
+      const userIdObj = new Types.ObjectId(playerId);
+      const eventIdObj = new Types.ObjectId(eventId);
+      
+      const db = this.playerModel.db.db;
+      const result = await db.collection('battleroyaleplayers').updateOne(
+        { 
+          userId: userIdObj, 
+          eventId: eventIdObj 
+        },
+        {
+          $set: {
+            cashWon: amount,
           }
-        );
-        
-        this.logger.log(`Cash update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-        
-        // Fallback with string IDs if needed
-        if (result.matchedCount === 0) {
-          const fallbackResult = await db.collection('battleroyaleplayers').updateOne(
-            { 
-              userId: playerId, 
-              eventId: eventId 
-            },
-            {
-              $set: {
-                cashWon: amount,
-              }
-            }
-          );
-          
-          this.logger.log(`Fallback cash update: matched ${fallbackResult.matchedCount}, modified ${fallbackResult.modifiedCount}`);
         }
-      } catch (error) {
-        this.logger.error(`Failed to update player cash in database: ${error.message}`);
+      );
+      
+      this.logger.log(`Cash update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
+      
+      if (result.matchedCount === 0) {
+        this.logger.warn(`[DB] No document matched ${JSON.stringify({ 
+          userId: userIdObj.toString(), 
+          eventId: eventIdObj.toString() 
+        })}`);
       }
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} cashWon in database:`, error);
