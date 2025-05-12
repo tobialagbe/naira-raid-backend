@@ -483,15 +483,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     // Reduce health
     player.health = Math.max(0, player.health - data.damage);
 
-    // Check if death occurred
-    // if (player.health <= 0) {
-    //   player.isAlive = false;
-
-    //   // Update DB if it's a Battle Royale event
-    //   if (player.eventId) {
-    //     this.updatePlayerDeathInDatabase(playerId, player.eventId, data.position || 0);
-    //   }
-    // }
 
     // Broadcast damage to other players
     this.broadcastExcept({
@@ -531,7 +522,72 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     
     // Update database for an official death
     if (player.eventId) {
-      await this.updatePlayerDeathInDatabase(playerId, player.eventId, playerRank);
+      try {
+        // Use MongoDB directly to update the player status
+        const userIdObj = new Types.ObjectId(playerId);
+        const eventIdObj = new Types.ObjectId(player.eventId);
+        
+        const db = this.playerModel.db.db;
+        
+        // Verify if player exists and check current status
+        const playerDoc = await db.collection('battleroyaleplayers').findOne({
+          userId: userIdObj,
+          eventId: eventIdObj
+        });
+        
+        if (!playerDoc) {
+          this.logger.warn(`Player ${playerId} not found in database. Trying string IDs...`);
+          
+          // Try with string IDs
+          const stringDoc = await db.collection('battleroyaleplayers').findOne({
+            userId: playerId,
+            eventId: player.eventId
+          });
+          
+          if (!stringDoc) {
+            this.logger.error(`Player ${playerId} not found in database with any ID format!`);
+          }
+        } else {
+          this.logger.log(`Found player document: ${JSON.stringify(playerDoc)}`);
+        }
+        
+        // Set player as eliminated with the calculated position
+        const result = await db.collection('battleroyaleplayers').updateOne(
+          { userId: userIdObj, eventId: eventIdObj },
+          {
+            $set: {
+              status: 'eliminated',
+              isAlive: false,
+              position: playerRank,
+              cashWon: 0 // Reset cash on death
+            }
+          }
+        );
+        
+        this.logger.log(`Death DB update: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
+        
+        // Try fallback with string IDs if needed
+        if (result.matchedCount === 0) {
+          const fallbackResult = await db.collection('battleroyaleplayers').updateOne(
+            { userId: playerId, eventId: player.eventId },
+            {
+              $set: {
+                status: 'eliminated',
+                isAlive: false,
+                position: playerRank,
+                cashWon: 0
+              }
+            }
+          );
+          
+          this.logger.log(`Fallback death update: matched ${fallbackResult.matchedCount}, modified ${fallbackResult.modifiedCount}`);
+        }
+      } catch (error) {
+        this.logger.error(`Failed to update player death in database: ${error.message}`);
+      }
+      
+      // Don't use old method anymore
+      // await this.updatePlayerDeathInDatabase(playerId, player.eventId, playerRank);
     }
 
     // Send death stats directly to the player who died
@@ -583,10 +639,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     // Reset the player's cash to 0 after death
     player.cashCollected = 0;
 
-    // Update cashWon in database to 0 since player died
-    if (player.eventId) {
-      await this.updatePlayerCashWon(playerId, player.eventId, 0);
-    }
+    // Cash is already reset to 0 in the updatePlayerDeathInDatabase method
+    // No need for separate cashWon update
 
     // Broadcast "death" to others in the room AND event
     this.broadcastExcept({
@@ -596,60 +650,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     }, playerId, player.roomId, player.eventId);
   }
 
-  /**
-   * Debug method to check if player exists in database and verify ID formats
-   */
-  private async debugCheckPlayerInDatabase(playerId: string, eventId: string) {
-    try {
-      this.logger.log(`DEBUG CHECK - Looking for player in DB: ${playerId} in event ${eventId}`);
-      
-      const db = this.playerModel.db.db;
-      
-      // Try with string values first
-      const playerWithStringIds = await db.collection('battleroyaleplayers').findOne({
-        userId: playerId,
-        eventId: eventId
-      });
-      
-      this.logger.log(`Player found with string IDs: ${!!playerWithStringIds}`);
-      
-      if (playerWithStringIds) {
-        this.logger.log(`Player document structure: ${JSON.stringify(playerWithStringIds)}`);
-      }
-      
-      // Try with ObjectId values
-      try {
-        const userIdObj = new Types.ObjectId(playerId);
-        const eventIdObj = new Types.ObjectId(eventId);
-        
-        const playerWithObjectIds = await db.collection('battleroyaleplayers').findOne({
-          userId: userIdObj,
-          eventId: eventIdObj
-        });
-        
-        this.logger.log(`Player found with ObjectId IDs: ${!!playerWithObjectIds}`);
-        
-        if (playerWithObjectIds) {
-          this.logger.log(`Player document structure with ObjectIds: ${JSON.stringify(playerWithObjectIds)}`);
-        }
-      } catch (objIdError) {
-        this.logger.error(`Error trying ObjectId conversion: ${objIdError.message}`);
-      }
-      
-      // Check existing document schema (any document)
-      const anyPlayer = await db.collection('battleroyaleplayers').findOne({});
-      if (anyPlayer) {
-        this.logger.log(`Example document structure: ${JSON.stringify(anyPlayer)}`);
-        this.logger.log(`userId type: ${typeof anyPlayer.userId}, representation: ${anyPlayer.userId}`);
-        this.logger.log(`eventId type: ${typeof anyPlayer.eventId}, representation: ${anyPlayer.eventId}`);
-      } else {
-        this.logger.log('No player documents found in collection');
-      }
-      
-    } catch (error) {
-      this.logger.error(`Debug check failed: ${error.message}`);
-    }
-  }
+
 
   /**
    * handleGameEnd
@@ -667,10 +668,81 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     const finalCash = player.cashCollected || 0;
     this.logger.log(`Player ${playerId} completed the game with rank ${playerRank}, cash collected: ${finalCash}`);
 
+    // Debug log the win event
+    this.logger.log(`DEBUG - Winner: ${playerId} in room ${player.roomId}, event ${player.eventId}, position ${playerRank}`);
+
     // Update database with winner status and cash won
     if (player.eventId) {
-      await this.updatePlayerWinInDatabase(playerId, player.eventId, playerRank);
-      await this.updatePlayerCashWon(playerId, player.eventId, finalCash);
+      try {
+        // Mark player as winner explicitly with position 1
+        const userIdObj = new Types.ObjectId(playerId);
+        const eventIdObj = new Types.ObjectId(player.eventId);
+        
+        const db = this.playerModel.db.db;
+        
+        // First try to verify the player exists in the database
+        const playerDoc = await db.collection('battleroyaleplayers').findOne({
+          userId: userIdObj,
+          eventId: eventIdObj
+        });
+        
+        if (!playerDoc) {
+          this.logger.warn(`Winner player ${playerId} not found in database with ObjectId format. Trying with string values...`);
+          
+          const playerStringDoc = await db.collection('battleroyaleplayers').findOne({
+            userId: playerId,
+            eventId: player.eventId
+          });
+          
+          if (playerStringDoc) {
+            this.logger.log(`Found player with string IDs: ${JSON.stringify(playerStringDoc)}`);
+          } else {
+            this.logger.error(`Winner player ${playerId} not found in database with any ID format!`);
+          }
+        } else {
+          this.logger.log(`Found player in database: ${JSON.stringify(playerDoc)}`);
+        }
+        
+        // Try update with ObjectId format
+        const result = await db.collection('battleroyaleplayers').updateOne(
+          { 
+            userId: userIdObj, 
+            eventId: eventIdObj 
+          },
+          {
+            $set: {
+              status: 'winner',  // Explicitly set 'winner' status
+              isAlive: true,     // Winners stay alive
+              position: 1,       // Position 1 for winners
+              cashWon: finalCash // Update cash amount
+            }
+          }
+        );
+        
+        this.logger.log(`Winner DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
+        
+        // Also try with string IDs as fallback
+        if (result.matchedCount === 0) {
+          const fallbackResult = await db.collection('battleroyaleplayers').updateOne(
+            { 
+              userId: playerId, 
+              eventId: player.eventId
+            },
+            {
+              $set: {
+                status: 'winner',
+                isAlive: true,
+                position: 1,
+                cashWon: finalCash
+              }
+            }
+          );
+          
+          this.logger.log(`Fallback winner update result: matched ${fallbackResult.matchedCount}, modified ${fallbackResult.modifiedCount}`);
+        }
+      } catch (error) {
+        this.logger.error(`Failed to update winner status for player ${playerId}:`, error);
+      }
     }
 
     // Send game end stats directly to the player
@@ -706,44 +778,53 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player death: ${playerId} in room ${roomId}, event ${eventId}, position ${position}`);
       
-      /* Debug code - commented out
-      try {
-        const debugData = {
-          debugType: 'player_death',
-          timestamp: new Date(),
-          playerId,
-          roomId,
-          eventId,
-          position,
-          playerInfo: player ? { ...player } : null
-        };
-        
-        // Using MongoDB directly to create a debug log collection
-        const db = this.playerModel.db.db;
-        await db.collection('battle_royale_debug_logs').insertOne(debugData);
-        
-        this.logger.log(`Created debug record for player death: ${playerId}`);
-      } catch (debugError) {
-        this.logger.error(`Failed to create debug record: ${debugError.message}`);
-      }
-      */
-      
       // Original update logic using MongoDB directly
       try {
         const userIdObj = new Types.ObjectId(playerId);
         const eventIdObj = new Types.ObjectId(eventId);
         
         const db = this.playerModel.db.db;
+        
+        // Check if position is 0 (timeout or disconnect) - if so, don't overwrite actual position
+        // This prevents overwriting position for players who have already been assigned a rank
+        const query = { 
+          userId: userIdObj, 
+          eventId: eventIdObj 
+        };
+        
+        // Only update position if it's not already set or if the new position is meaningful
+        if (position === 0) {
+          // For timeouts/disconnects, don't change position if it's already set
+          const currentPlayer = await db.collection('battleroyaleplayers').findOne(query);
+          if (currentPlayer && currentPlayer.position > 0) {
+            this.logger.log(`Not overwriting existing position ${currentPlayer.position} for player ${playerId}`);
+            
+            // Just update status to eliminated and set cashWon to 0
+            const result = await db.collection('battleroyaleplayers').updateOne(
+              query,
+              {
+                $set: {
+                  status: 'eliminated',
+                  isAlive: false,
+                  cashWon: 0, // Reset cash on death/disconnect
+                }
+              }
+            );
+            
+            this.logger.log(`DB update result (status only): matched ${result.matchedCount}, modified ${result.modifiedCount}`);
+            return;
+          }
+        }
+        
+        // In all other cases, update everything
         const result = await db.collection('battleroyaleplayers').updateOne(
-          { 
-            userId: userIdObj, 
-            eventId: eventIdObj 
-          },
+          query,
           {
             $set: {
-              status: position === 1 ? 'winner' : 'eliminated',
+              status: 'eliminated', // Always 'eliminated' for this method, winners use updatePlayerWinInDatabase
               isAlive: false,
-              position: position,
+              position: position > 0 ? position : 0, // Only set meaningful positions (> 0)
+              cashWon: 0, // Reset cash on death
             }
           }
         );
@@ -764,9 +845,10 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
               },
               {
                 $set: {
-                  status: position === 1 ? 'winner' : 'eliminated',
+                  status: 'eliminated',
                   isAlive: false,
-                  position: position,
+                  position: position > 0 ? position : 0,
+                  cashWon: 0, // Reset cash on death
                 }
               }
             );
@@ -798,29 +880,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player win: ${playerId} in room ${roomId}, event ${eventId}, position ${position}`);
       
-      /* Debug code - commented out
-      try {
-        const debugData = {
-          debugType: 'player_win',
-          timestamp: new Date(),
-          playerId,
-          roomId,
-          eventId,
-          position,
-          cashCollected: player ? player.cashCollected || 0 : 0,
-          playerInfo: player ? { ...player } : null
-        };
-        
-        // Using MongoDB directly to create a debug log collection
-        const db = this.playerModel.db.db;
-        await db.collection('battle_royale_debug_logs').insertOne(debugData);
-        
-        this.logger.log(`Created debug record for player win: ${playerId}`);
-      } catch (debugError) {
-        this.logger.error(`Failed to create debug record: ${debugError.message}`);
-      }
-      */
-      
+
       // Original update logic using MongoDB directly
       try {
         const userIdObj = new Types.ObjectId(playerId);
@@ -928,11 +988,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // Update cashWon in database to 0 since player disconnected
-    if (player.eventId) {
-      await this.updatePlayerCashWon(playerId, player.eventId, 0);
-    }
-
     // Broadcast disconnect to other players in the room AND event
     this.broadcastExcept({
       type: 'disconnect',
@@ -1034,7 +1089,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
           },
           {
             $set: {
-              roomId,
               status: 'active',
               isAlive: true,
               position: 0,
@@ -1058,7 +1112,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
               },
               {
                 $set: {
-                  roomId,
                   status: 'active',
                   isAlive: true,
                   position: 0,
@@ -1073,56 +1126,11 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         }
       }
       
-      this.logger.log(`Completed update attempt for player ${playerId} in database with roomId ${roomId}`);
+      this.logger.log(`Completed update attempt for player ${playerId} in database`);
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} in database:`, error);
     }
   }
-
-  /**
-   * handleCashSpawn
-   * ---------------
-   * Broadcasts a "cash_spawn" event to all players so they instantiate the cash object.
-   * Ensures each cashId is only processed once.
-   */
-  // private handleCashSpawn(data: any) {
-  //   const cashId = data.cashId;
-  //   const position = data.position;
-  //   const playerId = data.playerId;
-  //   // Client must provide eventId for cash objects
-  //   const eventId = data.eventId;
-    
-  //   if (!cashId) {
-  //     this.logger.warn('Received cash_spawn without cashId');
-  //     return;
-  //   }
-
-  //   // Determine room and event based on spawning player
-  //   const roomId = playerId && this.players[playerId] ? this.players[playerId].roomId : null;
-  //   const playerEventId = playerId && this.players[playerId] ? this.players[playerId].eventId : null;
-    
-  //   // Use provided eventId or player's eventId
-  //   const finalEventId = eventId || playerEventId;
-
-  //   // Store if not already
-  //   if (!this.cashObjects[cashId]) {
-  //     this.cashObjects[cashId] = { position, roomId, eventId: finalEventId };
-  //   }
-
-  //   // Broadcast to players in the same room AND event
-  //   this.broadcastExcept(
-  //     {
-  //       type: 'cash_spawn',
-  //       cashId: cashId,
-  //       position: position,
-  //       playerId: playerId,
-  //       eventId: finalEventId,
-  //     },
-  //     playerId,
-  //     roomId,
-  //     finalEventId,
-  //   );
-  // }
 
   /**
    * handleCashCollected
@@ -1194,29 +1202,6 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player cash update: ${playerId} in room ${roomId}, event ${eventId}, cash amount ${amount}`);
       
-      /* Debug code - commented out
-      try {
-        const debugData = {
-          debugType: 'player_cash_update',
-          timestamp: new Date(),
-          playerId,
-          roomId,
-          eventId,
-          amount,
-          playerInfo: player ? { ...player } : null
-        };
-        
-        // Using MongoDB directly to create a debug log collection
-        const db = this.playerModel.db.db;
-        await db.collection('battle_royale_debug_logs').insertOne(debugData);
-        
-        this.logger.log(`Created debug record for player cash update: ${playerId}`);
-      } catch (debugError) {
-        this.logger.error(`Failed to create debug record: ${debugError.message}`);
-      }
-      */
-      
-      // Original update logic using MongoDB directly
       try {
         const userIdObj = new Types.ObjectId(playerId);
         const eventIdObj = new Types.ObjectId(eventId);
@@ -1234,35 +1219,27 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
           }
         );
         
-        this.logger.log(`DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-      } catch (dbError) {
-        this.logger.error(`Database update error: ${dbError.message}`);
+        this.logger.log(`Cash update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
         
-        // Fallback to find the player record by non-ObjectId values if conversion fails
-        if (dbError.message && dbError.message.includes('ObjectId')) {
-          try {
-            this.logger.log('Attempting fallback update with string values');
-            const db = this.playerModel.db.db;
-            const result = await db.collection('battleroyaleplayers').updateOne(
-              { 
-                userId: playerId, 
-                eventId: eventId 
-              },
-              {
-                $set: {
-                  cashWon: amount,
-                }
+        // Fallback with string IDs if needed
+        if (result.matchedCount === 0) {
+          const fallbackResult = await db.collection('battleroyaleplayers').updateOne(
+            { 
+              userId: playerId, 
+              eventId: eventId 
+            },
+            {
+              $set: {
+                cashWon: amount,
               }
-            );
-            
-            this.logger.log(`Fallback DB update result: matched ${result.matchedCount}, modified ${result.modifiedCount}`);
-          } catch (fallbackError) {
-            this.logger.error(`Fallback update failed: ${fallbackError.message}`);
-          }
+            }
+          );
+          
+          this.logger.log(`Fallback cash update: matched ${fallbackResult.matchedCount}, modified ${fallbackResult.modifiedCount}`);
         }
+      } catch (error) {
+        this.logger.error(`Failed to update player cash in database: ${error.message}`);
       }
-      
-      this.logger.log(`Completed update attempt for player ${playerId} cashWon in database with amount ${amount}`);
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} cashWon in database:`, error);
     }
