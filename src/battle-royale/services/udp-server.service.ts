@@ -6,6 +6,7 @@ import * as dgram from 'dgram';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { BattleRoyalePlayer, BattleRoyalePlayerDocument } from '../schemas/battle-royale-player.schema';
+import { Types } from 'mongoose';
 
 /**
  * UdpServerService
@@ -647,7 +648,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player death: ${playerId} in room ${roomId}, event ${eventId}, position ${position}`);
       
-      // Create debug record in database
+      /* Debug code - commented out
       try {
         const debugData = {
           debugType: 'player_death',
@@ -667,16 +668,20 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       } catch (debugError) {
         this.logger.error(`Failed to create debug record: ${debugError.message}`);
       }
+      */
       
-      // Original update logic
-      // await this.playerModel.findOneAndUpdate(
-      //   { userId: playerId, eventId },
-      //   {
-      //     status: position === 1 ? 'winner' : 'eliminated',
-      //     isAlive: false,
-      //     position: position,
-      //   },
-      // );
+      // Original update logic using MongoDB directly
+      const db = this.playerModel.db.db;
+      await db.collection('battleroyaleplayers').updateOne(
+        { userId: playerId, eventId: new Types.ObjectId(eventId) },
+        {
+          $set: {
+            status: position === 1 ? 'winner' : 'eliminated',
+            isAlive: false,
+            position: position,
+          }
+        }
+      );
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} death in database:`, error);
     }
@@ -696,7 +701,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player win: ${playerId} in room ${roomId}, event ${eventId}, position ${position}`);
       
-      // Create debug record in database
+      /* Debug code - commented out
       try {
         const debugData = {
           debugType: 'player_win',
@@ -717,16 +722,20 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       } catch (debugError) {
         this.logger.error(`Failed to create debug record: ${debugError.message}`);
       }
+      */
       
-      // Original update logic
-      // await this.playerModel.findOneAndUpdate(
-      //   { userId: playerId, eventId },
-      //   {
-      //     status: 'winner',
-      //     isAlive: true,
-      //     position: position,
-      //   },
-      // );
+      // Original update logic using MongoDB directly
+      const db = this.playerModel.db.db;
+      await db.collection('battleroyaleplayers').updateOne(
+        { userId: playerId, eventId: new Types.ObjectId(eventId) },
+        {
+          $set: {
+            status: 'winner',
+            isAlive: true,
+            position: position,
+          }
+        }
+      );
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} win in database:`, error);
     }
@@ -855,7 +864,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player connect/join: ${playerId} in room ${roomId}, event ${eventId}`);
       
-      // Create debug record in database
+      /* Debug code - commented out
       try {
         const debugData = {
           debugType: 'player_connect',
@@ -874,17 +883,21 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       } catch (debugError) {
         this.logger.error(`Failed to create debug record: ${debugError.message}`);
       }
+      */
       
-      // Original update logic
-      // await this.playerModel.findOneAndUpdate(
-      //   { userId: playerId, eventId },
-      //   {
-      //     roomId,
-      //     status: 'active',
-      //     isAlive: true,
-      //     position: 0,
-      //   },
-      // );
+      // Original update logic using MongoDB directly
+      const db = this.playerModel.db.db;
+      await db.collection('battleroyaleplayers').updateOne(
+        { userId: playerId, eventId: new Types.ObjectId(eventId) },
+        {
+          $set: {
+            roomId,
+            status: 'active',
+            isAlive: true,
+            position: 0,
+          }
+        }
+      );
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} in database:`, error);
     }
@@ -1005,7 +1018,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       // Debug log record
       this.logger.log(`DEBUG - Player cash update: ${playerId} in room ${roomId}, event ${eventId}, cash amount ${amount}`);
       
-      // Create debug record in database
+      /* Debug code - commented out
       try {
         const debugData = {
           debugType: 'player_cash_update',
@@ -1025,14 +1038,18 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
       } catch (debugError) {
         this.logger.error(`Failed to create debug record: ${debugError.message}`);
       }
+      */
       
-      // Original update logic
-      // await this.playerModel.findOneAndUpdate(
-      //   { userId: playerId, eventId },
-      //   {
-      //     cashWon: amount,
-      //   },
-      // );
+      // Original update logic using MongoDB directly
+      const db = this.playerModel.db.db;
+      await db.collection('battleroyaleplayers').updateOne(
+        { userId: playerId, eventId: new Types.ObjectId(eventId) },
+        {
+          $set: {
+            cashWon: amount,
+          }
+        }
+      );
     } catch (error) {
       this.logger.error(`Failed to update player ${playerId} cashWon in database:`, error);
     }
