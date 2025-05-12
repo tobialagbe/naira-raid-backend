@@ -61,7 +61,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Configuration constants
    */
   private readonly UDP_PORT = 41234;
-  private readonly PLAYER_TIMEOUT = 20000;      // 20 seconds inactivity => disconnect
+  private readonly PLAYER_TIMEOUT = 60000;      // 60 seconds inactivity => disconnect
   private readonly CLEANUP_INTERVAL = 25000;    // 25 seconds interval to check for inactivity
   private readonly PING_INTERVAL = 5000;       // Clients should ping every 5 seconds
 
@@ -84,7 +84,13 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    */
   onModuleInit() {
     this.startServer();
-    this.cleanupTimer = setInterval(() => this.cleanupDisconnectedPlayers(), this.CLEANUP_INTERVAL);
+    this.cleanupTimer = setInterval(async () => {
+      try {
+        await this.cleanupDisconnectedPlayers();
+      } catch (error) {
+        this.logger.error('Error in cleanup interval:', error);
+      }
+    }, this.CLEANUP_INTERVAL);
   }
 
   /**
@@ -118,7 +124,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     });
 
     // Handle incoming messages
-    this.server.on('message', (msg, rinfo) => {
+    this.server.on('message', async (msg, rinfo) => {
       try {
         const data = JSON.parse(msg.toString());
         const playerId = data.playerId;
@@ -143,7 +149,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         // Main switch for game events
         switch (data.type) {
           case 'connect':
-            this.handleConnect(data, rinfo);
+            await this.handleConnect(data, rinfo);
             break;
           case 'move':
             this.handleMove(data, rinfo);
@@ -161,19 +167,19 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
             this.handleDamage(data, rinfo);
             break;
           case 'death':
-            this.handleDeath(data, rinfo);
+            await this.handleDeath(data, rinfo);
             break;
           case 'game_end':
-            this.handleGameEnd(data, rinfo);
+            await this.handleGameEnd(data, rinfo);
             break;
           case 'disconnect':
-            this.handleDisconnect(data, rinfo);
+            await this.handleDisconnect(data, rinfo);
             break;
           // case 'cash_spawn':
           //   this.handleCashSpawn(data);
             break;
           case 'cash_collected':
-            this.handleCashCollected(data);
+            await this.handleCashCollected(data);
             break;
           default:
             // Use template string for clarity in logs
@@ -235,7 +241,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Periodically checks which players have been inactive too long
    * and broadcasts a "disconnect" event for them.
    */
-  private cleanupDisconnectedPlayers() {
+  private async cleanupDisconnectedPlayers() {
     const now = Date.now();
     const disconnectedPlayers: string[] = [];
 
@@ -272,7 +278,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         // you can set isAlive = false or update the DB here, e.g.:
         playerInfo.isAlive = false;
         if (playerInfo.eventId) {
-          this.updatePlayerDeathInDatabase(playerId, playerInfo.eventId, /*position=*/0);
+          await this.updatePlayerDeathInDatabase(playerId, playerInfo.eventId, /*position=*/0);
         }
 
         // Clean up memory
@@ -290,7 +296,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * - Sends back "connect_ack" with current players in the room.
    * - Broadcasts "spawn" to all other players in the same room.
    */
-  private handleConnect(data: any, rinfo: dgram.RemoteInfo) {
+  private async handleConnect(data: any, rinfo: dgram.RemoteInfo) {
     const playerId = data.playerId;
     const roomId = data.roomId || null;
     const eventId = data.eventId || null;
@@ -314,7 +320,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
       // Update the player's roomId/status in DB if eventId is provided
       if (eventId && roomId) {
-        this.updatePlayerInDatabase(playerId, eventId, roomId);
+        await this.updatePlayerInDatabase(playerId, eventId, roomId);
       }
     }
 
@@ -504,7 +510,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * -----------
    * Handles an explicit "death" event from the client (e.g., they've definitely died).
    */
-  private handleDeath(data: any, rinfo: dgram.RemoteInfo) {
+  private async handleDeath(data: any, rinfo: dgram.RemoteInfo) {
     const playerId = data.playerId;
     const player = this.players[playerId];
     if (!player) return;
@@ -521,7 +527,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     // Update database for an official death
     if (player.eventId) {
-      this.updatePlayerDeathInDatabase(playerId, player.eventId, playerRank);
+      await this.updatePlayerDeathInDatabase(playerId, player.eventId, playerRank);
     }
 
     // Send death stats directly to the player who died
@@ -575,7 +581,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     // Update cashWon in database to 0 since player died
     if (player.eventId) {
-      this.updatePlayerCashWon(playerId, player.eventId, 0);
+      await this.updatePlayerCashWon(playerId, player.eventId, 0);
     }
 
     // Broadcast "death" to others in the room AND event
@@ -592,7 +598,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Handles an explicit "game_end" event from the client (they've made it to the end of the game).
    * Unlike death, the player's cash is preserved and they're marked as a winner.
    */
-  private handleGameEnd(data: any, rinfo: dgram.RemoteInfo) {
+  private async handleGameEnd(data: any, rinfo: dgram.RemoteInfo) {
     const playerId = data.playerId;
     const player = this.players[playerId];
     if (!player) return;
@@ -604,8 +610,8 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     // Update database with winner status and cash won
     if (player.eventId) {
-      this.updatePlayerWinInDatabase(playerId, player.eventId, playerRank);
-      this.updatePlayerCashWon(playerId, player.eventId, finalCash);
+      await this.updatePlayerWinInDatabase(playerId, player.eventId, playerRank);
+      await this.updatePlayerCashWon(playerId, player.eventId, finalCash);
     }
 
     // Send game end stats directly to the player
@@ -673,7 +679,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * Handles an explicit disconnect message from a client.
    * This allows for clean disconnections without waiting for timeout.
    */
-  private handleDisconnect(data: any, rinfo: dgram.RemoteInfo) {
+  private async handleDisconnect(data: any, rinfo: dgram.RemoteInfo) {
     const playerId = data.playerId;
     const player = this.players[playerId];
     if (!player) return;
@@ -720,7 +726,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     // Update cashWon in database to 0 since player disconnected
     if (player.eventId) {
-      this.updatePlayerCashWon(playerId, player.eventId, 0);
+      await this.updatePlayerCashWon(playerId, player.eventId, 0);
     }
 
     // Broadcast disconnect to other players in the room AND event
@@ -731,7 +737,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
 
     // If this was a Battle Royale event player, update their status
     if (player.eventId) {
-      this.updatePlayerDeathInDatabase(playerId, player.eventId, 0);
+      await this.updatePlayerDeathInDatabase(playerId, player.eventId, 0);
     }
 
     // Clean up the player data
@@ -848,7 +854,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
    * -------------------
    * Broadcasts a "cash_collected" event and removes it from internal map.
    */
-  private handleCashCollected(data: any) {
+  private async handleCashCollected(data: any) {
     const cashId = data.cashId;
     const playerId = data.playerId;
     // Client can provide eventId for better routing

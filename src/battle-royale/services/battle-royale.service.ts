@@ -35,7 +35,7 @@ export class BattleRoyaleService {
   /**
    * Get all events with optional filtering
    */
-  async getEvents(status?: string) {
+  async getEvents(status?: string, userId?: string) {
     const query: any = {};
     if (status) {
       query.status = status;
@@ -54,7 +54,40 @@ export class BattleRoyaleService {
         const registeredParticipants = await this.playerModel.countDocuments({
           eventId: event._id,
         });
-        return { ...event, registeredParticipants };
+        
+        let isRegistered = false;
+        let userRoomId = null;
+        let hasParticipated = false;
+        
+        if (userId) {
+          const registration = await this.playerModel.findOne({
+            userId: new Types.ObjectId(userId),
+            eventId: event._id,
+          });
+          
+          isRegistered = !!registration;
+          
+          if (registration) {
+            userRoomId = registration.roomId;
+            // Check if player has already participated
+            hasParticipated = registration.status !== 'registered';
+          }
+        }
+        
+        const result = { 
+          ...event, 
+          registeredParticipants 
+        };
+        
+        if (userId) {
+          Object.assign(result, {
+            isRegistered,
+            userRoomId,
+            hasParticipated
+          });
+        }
+        
+        return result;
       }),
     );
 
@@ -90,14 +123,20 @@ export class BattleRoyaleService {
 
         let isRegistered = false;
         let userRoomId = null;
+        let hasParticipated = false;
+        
         if (userId) {
           const registration = await this.playerModel.findOne({
             userId: new Types.ObjectId(userId),
             eventId: event._id,
           });
+          
           isRegistered = !!registration;
+          
           if (registration) {
             userRoomId = registration.roomId;
+            // Check if player has already participated
+            hasParticipated = registration.status !== 'registered';
           }
         }
         
@@ -123,6 +162,7 @@ export class BattleRoyaleService {
           registeredParticipants,
           isRegistered,
           userRoomId,
+          hasParticipated,
           rooms: roomsInfo,
           isFullyBooked: roomsInfo.every(room => room.isFull)
         };
@@ -135,14 +175,63 @@ export class BattleRoyaleService {
   /**
    * Get a specific event by ID
    */
-  async getEventById(eventId: string): Promise<BattleRoyaleEventDocument> {
-    const event = await this.eventModel.findById(eventId).exec();
+  async getEventById(eventId: string, userId?: string): Promise<any> {
+    const event = await this.eventModel.findById(eventId).lean().exec();
     
     if (!event) {
       throw new NotFoundException(`Event with ID ${eventId} not found`);
     }
     
-    return event;
+    // Attach participant count
+    const registeredParticipants = await this.playerModel.countDocuments({
+      eventId: event._id,
+    });
+    
+    const result = {
+      ...event,
+      registeredParticipants
+    };
+    
+    if (userId) {
+      const registration = await this.playerModel.findOne({
+        userId: new Types.ObjectId(userId),
+        eventId: event._id,
+      });
+      
+      const isRegistered = !!registration;
+      const userRoomId = registration ? registration.roomId : null;
+      const hasParticipated = registration ? registration.status !== 'registered' : false;
+      
+      Object.assign(result, {
+        isRegistered,
+        userRoomId,
+        hasParticipated
+      });
+      
+      // Get room occupancy information
+      const roomsInfo = await Promise.all(
+        BATTLE_ROYALE_ROOMS.map(async (roomId) => {
+          const occupancy = await this.playerModel.countDocuments({
+            eventId: event._id,
+            roomId
+          });
+          
+          return {
+            roomId,
+            occupancy,
+            isFull: occupancy >= MAX_PLAYERS_PER_ROOM,
+            capacity: MAX_PLAYERS_PER_ROOM
+          };
+        })
+      );
+      
+      Object.assign(result, {
+        rooms: roomsInfo,
+        isFullyBooked: roomsInfo.every(room => room.isFull)
+      });
+    }
+    
+    return result;
   }
 
   /**
@@ -362,7 +451,7 @@ export class BattleRoyaleService {
     // Fetch all event IDs the user is registered for
     const registrations = await this.playerModel
       .find({ userId: userIdObj })
-      .select('eventId roomId')
+      .select('eventId roomId status')
       .lean();
 
     const eventIds = registrations.map((r) => r.eventId);
@@ -397,6 +486,7 @@ export class BattleRoyaleService {
     );
     
     const userRoomId = userRegistration ? userRegistration.roomId : null;
+    const hasParticipated = userRegistration ? userRegistration.status !== 'registered' : false;
     
     // Get room occupancy information
     const roomsInfo = await Promise.all(
@@ -419,6 +509,7 @@ export class BattleRoyaleService {
       ...upcomingEvent,
       registeredParticipants,
       userRoomId,
+      hasParticipated,
       rooms: roomsInfo,
       isFullyBooked: roomsInfo.every(room => room.isFull)
     };
