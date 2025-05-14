@@ -98,11 +98,14 @@ export class BattleRoyaleService {
    * Get the latest 5 upcoming events with registration status
    */
   async getLatestUpcomingEvent(userId?: string) {
-    const now = new Date();
+    // Get today's date with time set to start of day (00:00:00)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
     const upcomingEvents = await this.eventModel
       .find({
-        eventDate: { $gte: now },
+        // Get events happening today or in the future
+        eventDate: { $gte: today },
         status: 'upcoming',
       })
       .sort({ eventDate: 1, startTime: 1 })

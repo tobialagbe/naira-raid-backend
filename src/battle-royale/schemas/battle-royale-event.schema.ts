@@ -36,6 +36,9 @@ export class BattleRoyaleEvent {
 
   @Prop({ default: [] })
   rooms: string[]; // List of active room IDs for this event
+  
+  @Prop({ default: 300 })
+  amountPerKill: number; // Default amount of cash spawned per kill
 }
 
 export const BattleRoyaleEventSchema = SchemaFactory.createForClass(BattleRoyaleEvent); 

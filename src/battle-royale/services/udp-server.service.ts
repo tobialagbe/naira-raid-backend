@@ -59,12 +59,21 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
   private cashObjects: Record<string, { position: any; roomId?: string; eventId?: string }> = {};
 
   /**
+   * eventSettings
+   * -------------
+   * Cache for event settings to avoid repeated database lookups
+   * Structure: { [eventId]: { amountPerKill: number, ... } }
+   */
+  private eventSettings: Record<string, { amountPerKill: number }> = {};
+
+  /**
    * Configuration constants
    */
   private readonly UDP_PORT = 41234;
   private readonly PLAYER_TIMEOUT = 60000;      // 60 seconds inactivity => disconnect
   private readonly CLEANUP_INTERVAL = 25000;    // 25 seconds interval to check for inactivity
   private readonly PING_INTERVAL = 5000;       // Clients should ping every 5 seconds
+  private readonly DEFAULT_AMOUNT_PER_KILL = 300; // Default cash amount if not specified in event
 
   /**
    * Timer for the cleanup interval
@@ -300,6 +309,53 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * getAmountPerKillForEvent
+   * ------------------------
+   * Gets the amountPerKill setting for an event, using an in-memory cache
+   * to avoid repeated database lookups.
+   */
+  private async getAmountPerKillForEvent(eventId: string): Promise<number> {
+    // Return cached value if we already have it
+    if (this.eventSettings[eventId] && typeof this.eventSettings[eventId].amountPerKill === 'number') {
+      return this.eventSettings[eventId].amountPerKill;
+    }
+    
+    // If not in cache, query the database
+    try {
+      if (Types.ObjectId.isValid(eventId)) {
+        const db = this.playerModel.db.db;
+        const eventInfo = await db.collection('battleroyaleevents').findOne({
+          _id: new Types.ObjectId(eventId)
+        });
+        
+        // If found in database, cache and return
+        if (eventInfo && typeof eventInfo.amountPerKill === 'number') {
+          // Initialize or update cache
+          if (!this.eventSettings[eventId]) {
+            this.eventSettings[eventId] = { amountPerKill: eventInfo.amountPerKill };
+          } else {
+            this.eventSettings[eventId].amountPerKill = eventInfo.amountPerKill;
+          }
+          
+          this.logger.log(`Cached amountPerKill for event ${eventId}: ${eventInfo.amountPerKill}`);
+          return eventInfo.amountPerKill;
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error fetching amountPerKill: ${error.message}`);
+    }
+    
+    // If not found or error, return default and cache it
+    if (!this.eventSettings[eventId]) {
+      this.eventSettings[eventId] = { amountPerKill: this.DEFAULT_AMOUNT_PER_KILL };
+    } else {
+      this.eventSettings[eventId].amountPerKill = this.DEFAULT_AMOUNT_PER_KILL;
+    }
+    
+    return this.DEFAULT_AMOUNT_PER_KILL;
+  }
+
+  /**
    * handleConnect
    * -------------
    * Handles a new player's "connect" message:
@@ -326,6 +382,12 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     
     // If new to this server, store their info
     if (!this.players[playerId]) {
+      // Cache event settings when a player connects to an event
+      let initialCashAmount = this.DEFAULT_AMOUNT_PER_KILL;
+      if (eventId) {
+        initialCashAmount = await this.getAmountPerKillForEvent(eventId);
+      }
+      
       this.players[playerId] = {
         address: rinfo.address,
         port: rinfo.port,
@@ -337,9 +399,9 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
         rotation: 0,
         isAlive: true,
         health: 20,
-        cashCollected: 300, // Initialize with 300 cash
+        cashCollected: initialCashAmount, // Initialize with event-specific amount
       };
-      this.logger.log(`Player connected: ${playerId} from ${rinfo.address}:${rinfo.port} with initial cash: 300`);
+      this.logger.log(`Player connected: ${playerId} from ${rinfo.address}:${rinfo.port} with initial cash: ${initialCashAmount}`);
 
       // Update the player's roomId/status in DB if eventId is provided
       if (eventId && roomId) {
@@ -606,7 +668,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     );
 
     // Store the cash amount before resetting it to include in the broadcast
-    const cashCollected = player.cashCollected || 300;
+    const cashCollected = player.cashCollected || this.DEFAULT_AMOUNT_PER_KILL;
     
     // Only spawn cash if the player had collected some
     if (cashCollected > 0) {
@@ -866,7 +928,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Player ${playerId} disconnected cleanly`);
 
     // Store the cash amount before cleanup
-    const cashCollected = player.cashCollected || 0;
+    const cashCollected = player.cashCollected || this.DEFAULT_AMOUNT_PER_KILL;
 
     // Only spawn cash if the player had collected some
     if (cashCollected > 0) {
@@ -1019,7 +1081,7 @@ export class UdpServerService implements OnModuleInit, OnModuleDestroy {
     // Client can provide eventId for better routing
     const eventId = data.eventId;
     // Optional cash amount value (default to 300)
-    const cashAmount = 300;
+    const cashAmount = data.cashAmount || this.DEFAULT_AMOUNT_PER_KILL;
     
     if (!cashId) {
       this.logger.warn('Received cash_collected without cashId');
